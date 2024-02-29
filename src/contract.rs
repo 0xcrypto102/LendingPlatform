@@ -3,6 +3,8 @@ use cosmwasm_std::entry_point;
 use cosmwasm_std::{
     to_binary, Api, Binary, CanonicalAddr, Deps, DepsMut, Env, MessageInfo, Response, StdError, StdResult, Storage,BankMsg
 };
+use cw721::{ContractInfoResponse, QueryMsg as CW721QueryMsg, ExecuteMsg as CW721ExecuteMsg};
+
 // use cw2::set_contract_version;
 
 use crate::error::ContractError;
@@ -26,26 +28,7 @@ pub fn instantiate(
         .into_iter()
         .collect();
 
-    let apy_collections: StdResult<Vec<_>> = msg
-        .apy_collections
-        .into_iter()
-        .collect();
-
-    let max_time_collections: StdResult<Vec<_>> = msg
-        .max_time_collections
-        .into_iter()
-        .collect()
-
-    let offers: StdResult<Vec<_>> = msg
-        .offers
-        .into_iter()
-        .collect()
-
     NFT_COLLECTIONS.save(dps.storage, &nft_collections)?;
-    APY_COLLECTIONS.save(deps.storage, &apy_collections)?;
-    MAX_TIME_COLLECTIONS.save(deps.storage, &max_time_collections)?;
-    OFFERS.save(deps.storage, &offers)?;
-    OFFER_INDEX.save(deps.storage, 0)?;
 
     Ok(Response::new())
 }
@@ -60,13 +43,21 @@ pub fn execute(
     use ExecuteMsg::*;
 
     match msg {
-        Lend { amount: u128, collection: String, contract_address: Addr } => exec::lend(
+        Lend { amount: u128, collection: String,nft_contract: Addr,apy: u16, contract_address: Addr } => exec::lend(
             deps, 
             info, 
             amount,
+            collection,
+            nft_contract,
+            apy,
             contact_address, 
-            collection
         ),
+        Borrow{ sender: Addr, offer_id: u16 } => exec::borrow(
+            deps,
+            info,
+            sender,
+            offer_id
+        )
     }
 }
 
@@ -78,6 +69,7 @@ mod exec {
         info: MessageInfo,
         amount: u128,
         collection: String,
+        nft_contract: Addr,
         apy: u16,
         contact_address: Addr,
     ) -> Result<Response, ContractError> {
@@ -105,6 +97,8 @@ mod exec {
             offer_id: offer_index +1,
             amount: amount,
             nft_collection: collection,
+            nft_contract: nft_contract,
+            token_id:"".to_string(),
             apy_collection: apy,
             accepted: false
         }
@@ -118,6 +112,34 @@ mod exec {
             .add_attribute("action", "lend")
             .add_attribute("offer",offer)
             .add_attribute("collection", collection))
+    }
+
+    pub fn borrow(
+        deps: DepsMut,
+        info: MessageInfo,
+        sender: Addr,
+        offer_id: u16
+    ) -> Result<Response, ContractError> {
+         // Query the storage to retrieve the offer by offer_id
+        let offer = OFFERS.may_load(deps.storage, &offer_id)?;
+
+        // Return an error if the offer does not exist
+        offer.ok_or_else(|| StdError::generic_err("Offer not found"));
+
+        // Verify that sender owns the NFT from the specific NFT contract address
+        let owner_nft_info: TokenInfoResponse = deps.querier.query(
+            &CW721QueryMsg::TokenInfo {
+                contract_addr: offer.nft_contract.to_string(), // Specify the NFT contract address
+            },
+        )?;
+
+        // Check if the sender owns the NFT and it is not approved
+        if owner_nft_info.owner != sender {
+            return Err(StdError::Unauthorized { backtrace: None });
+        }
+        
+        let token_id = owner_nft_info.token_id;
+        
     }
 }
 

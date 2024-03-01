@@ -41,13 +41,11 @@ cosmwasm-std = { version = "1.5.0", features = [
     # "cosmwasm_1_4",
 ] }
 cw-storage-plus = "1.1.0"
-cw-utils = "1.0.3"
 cw2 = "1.1.1"
 cw721 = "0.18.0"
-cw721-base = "0.18.0"
 schemars = "0.8.15"
 serde = { version = "1.0.189", default-features = false, features = ["derive"] }
 thiserror = { version = "1.0.49" }
 
 [dev-dependencies]
-cw-multi-test = "0.20.0"
+cw-multi-test = "0.17.0"

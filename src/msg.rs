@@ -12,12 +12,12 @@ pub struct InstantiateMsg {
 pub enum ExecuteMsg {
     Lend { amount: u128, collection_id: u16, contract_address: Addr },
     CancelOffer { offer_id: u16 },
-    Borrow { offer_id: u16, token_id: u16, contract_address: Addr },
+    Borrow { offer_id: u16, token_id: String, contract_address: Addr },
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub enum QueryMsg {
-    OfferList {}
+    OfferList { limit: Option<u32>, start_after: Option<u16> },
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
@@ -35,11 +35,9 @@ pub struct OfferResp {
     pub offer_id: u16,
     pub owner: Addr,
     pub amount: u128,
-    pub nft_collection: String,
-    pub nft_contract: String,
-    pub token_id: u16,
-    pub apy_collection: u16,
-    pub max_time: i64,
+    pub start_time: u64,
+    pub collection_id: u16,
+    pub token_id: String,
     pub accepted: bool, 
 }
 
@@ -49,5 +47,5 @@ pub struct NFTCollectionResp {
     pub collection: String,
     pub contract: String,
     pub apy: u16,
-    pub max_time: i64,
+    pub max_time: u64,
 }

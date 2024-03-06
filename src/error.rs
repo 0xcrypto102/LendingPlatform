@@ -6,12 +6,14 @@ pub enum ContractError {
     #[error("{0}")]
     Std(#[from] StdError),
 
-    // #[error("Unauthorized")]
-    // Unauthorized { info: Option<Addr> },
+    #[error("Not Owner")]
+    Unauthorized,
 
     #[error("Invalid NFT Owner")]
     InvalidNftOwner,
 
+    #[error("Lend amount should be less than floor price of collection")]
+    TooMuchLendAmount,
     
     #[error("Invalid Offer Owner")]
     InvalidOfferOwner,
@@ -27,6 +29,4 @@ pub enum ContractError {
 
     #[error("Offer already accepted")]
     OfferAlreadyAccepted,
-    // Add any other custom errors you like here.
-    // Look at https://docs.rs/thiserror/1.0.21/thiserror/ for details.
 }

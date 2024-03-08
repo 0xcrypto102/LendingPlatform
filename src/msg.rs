@@ -11,9 +11,9 @@ pub struct InstantiateMsg {
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub enum ExecuteMsg {
-    Lend { amount: u128, collection_id: u16, contract_address: Addr },
+    Lend { amount: u128, collection_id: u16 },
     CancelOffer { offer_id: u16 },
-    Borrow { offer_id: u16, token_id: String, contract_address: Addr },
+    Borrow { offer_id: u16, token_id: String },
     UpdateFloorPrice { collection_id: u16, new_floor_price: u128 },
     AddNFTCollection { collection: NFTCollectionResp },
     UpdateAdmin { new_admin: Addr },
@@ -53,7 +53,7 @@ pub struct NFTCollectionResp {
     pub collection_id: u16,
     pub collection: String,
     pub floor_price: u128,
-    pub contract: String,
+    pub contract: Addr,
     pub apy: u16,
     pub max_time: u64,
 }

@@ -43,25 +43,24 @@ pub fn execute(
     use ExecuteMsg::*;
 
     match msg {
-        Lend { amount, collection_id, contract_address } => exec::lend(
+        Lend { amount, collection_id } => exec::lend(
             deps, 
             env,
             info, 
             amount,
-            collection_id,
-            contract_address, 
+            collection_id
         ),
         CancelOffer { offer_id } => exec::cancel_offer(
             deps,
             info,
             offer_id
         ),
-        Borrow { offer_id, token_id, contract_address} => exec::borrow (
+        Borrow { offer_id, token_id} => exec::borrow (
             deps,
+            env,
             info,
             offer_id,
-            token_id,
-            contract_address
+            token_id
         ),
         UpdateFloorPrice{ collection_id, new_floor_price } => exec::update_floor_price (
             deps,
@@ -91,10 +90,10 @@ mod exec {
         info: MessageInfo,
         amount: u128,
         collection_id: u16,
-        contract_address: Addr,
     ) -> Result<Response, ContractError> {
         let denom = LEND_DENOM.load(deps.storage)?;
-        let offer_index = LAST_OFFER_INDEX.load(deps.storage)?;
+        let offer_index = LAST_OFFER_INDEX.load(deps.storage)?; 
+        let contract_address = env.contract.address.clone();
 
         // Get the collection associated with the offer
         let collections_option = NFT_COLLECTIONS.may_load(deps.storage)?;
@@ -199,17 +198,17 @@ mod exec {
 
     pub fn borrow(
         deps: DepsMut,
+        env: Env,
         info: MessageInfo,
         offer_id: u16,
         token_id: String,
-        contract_address: Addr
     ) -> Result<Response, ContractError> {
         // Load the offer from storage
         let mut offer = match OFFERS.may_load(deps.storage, offer_id)? {
             Some(offer) => offer,
             None => return Err(ContractError::OfferNotFound), // Return error if offer does not exist
         };
-
+        let contract_address = env.contract.address.clone();
         
         // Check if the offer is not already accepted
         if offer.accepted {
@@ -233,7 +232,7 @@ mod exec {
                 };
 
                 let execute_msg = CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: collection.contract.clone(),
+                    contract_addr: collection.contract.to_string(),
                     msg: to_binary(&msg)?,
                     funds: vec![],
                 });
@@ -379,7 +378,7 @@ mod tests {
                 collection_id: 1,
                 collection: "Collection 1".to_string(),
                 floor_price: 100,
-                contract: "Contract 1".to_string(),
+                contract: Addr::unchecked("Contract 1"),
                 apy: 5,
                 max_time: 100,
             },
@@ -387,7 +386,7 @@ mod tests {
                 collection_id: 2,
                 collection: "Collection 2".to_string(),
                 floor_price: 150,
-                contract: "Contract 2".to_string(),
+                contract: Addr::unchecked("Contract 2"),
                 apy: 7,
                 max_time: 130,
             },
@@ -423,9 +422,9 @@ mod tests {
 
         let contract_address = Addr::unchecked("contract");
         
-        let res: Response = lend(deps.as_mut(), env.clone(), user_info.clone(), amount1, collection_id1, contract_address.clone()).unwrap();
+        let res: Response = lend(deps.as_mut(), env.clone(), user_info.clone(), amount1, collection_id1).unwrap();
 
-        let res: Response = lend(deps.as_mut(), env.clone(), user_info.clone(), amount2, collection_id2, contract_address.clone()).unwrap();
+        let res: Response = lend(deps.as_mut(), env.clone(), user_info.clone(), amount2, collection_id2).unwrap();
 
 
         // Verify the state changes
@@ -474,7 +473,7 @@ mod tests {
 
         let contract_address = Addr::unchecked("contract");
         
-        let res: Response = lend(deps.as_mut(), env.clone(), user_info.clone(), amount, collection_id, contract_address.clone()).unwrap();
+        let res: Response = lend(deps.as_mut(), env.clone(), user_info.clone(), amount, collection_id).unwrap();
         // ************************************************
 
         // Bororw function
@@ -484,7 +483,7 @@ mod tests {
         let token_id = "token123".to_string();
         let contract_address = Addr::unchecked("contract");
 
-        let borrow_msg = ExecuteMsg::Borrow { offer_id, token_id: token_id.clone(), contract_address };
+        let borrow_msg = ExecuteMsg::Borrow { offer_id, token_id: token_id.clone() };
 
         let res = execute(deps.as_mut(), env.clone(), borrow_info.clone(), borrow_msg).unwrap();
 
@@ -502,7 +501,7 @@ mod tests {
             collection_id: 3,
             collection: "Collection 3".to_string(),
             floor_price: 200,
-            contract: "Contract 3".to_string(),
+            contract: Addr::unchecked("Contract 3"),
             apy: 5,
             max_time: 100,
         };

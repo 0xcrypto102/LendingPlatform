@@ -78,6 +78,12 @@ pub fn execute(
             info,
             new_admin
         ),
+        RepaySuccess { offer_id } => exec::repay_success (
+            deps,
+            info,
+            env,
+            offer_id
+        )
     }
 }
 
@@ -329,6 +335,111 @@ mod exec {
         Ok(Response::new()
                 .add_attribute("action", "update_admin"))
     }
+
+    pub fn repay_success(
+        deps: DepsMut,
+        info: MessageInfo,
+        env: Env,
+        offer_id: u16,
+    ) -> Result<Response, ContractError>  {
+        // Load the denom
+        let denom = LEND_DENOM.load(deps.storage)?;
+        // Load the config
+        let config = CONFIG.load(deps.storage)?;
+        // Load the offer from storage
+        let offer = match OFFERS.may_load(deps.storage, offer_id)? {
+            Some(offer) => offer,
+            None => return Err(ContractError::OfferNotFound), // Return error if offer does not exist
+        };
+        // Check if the sender is the owner of the offer
+        if offer.borrower != info.sender {
+            return Err(ContractError::InvalidBorrow);
+        }
+
+        // Check if the offer was accepted
+        if !offer.accepted {
+            return Err(ContractError::OfferNotAccepted);
+        }
+
+        // Get the collection associated with the offer
+        let collections_option = NFT_COLLECTIONS.may_load(deps.storage)?;
+
+        // Check if loading collections was successful
+        if let Some(collections) = collections_option {
+            // Find the collection with the specified collection_id
+            let collection_option = collections.iter().find(|collection| collection.collection_id == offer.collection_id);
+
+            // Check if the collection with the specified collection_id exists
+            if let Some(collection) = collection_option {
+
+                let current_time = env.block.time.seconds();
+                if (offer.start_time + collection.max_time) < current_time {
+                    //  Send the NFT to the contract address
+                    let msg = Cw721ExecuteMsg::TransferNft {
+                        recipient: config.admin.to_string(),
+                        token_id: offer.token_id.to_string(),
+                    };
+
+                    let execute_msg = CosmosMsg::Wasm(WasmMsg::Execute {
+                        contract_addr: collection.contract.to_string(),
+                        msg: to_binary(&msg)?,
+                        funds: vec![],
+                    });
+                    
+                    let messages: Vec<CosmosMsg> = vec![execute_msg];
+                    Ok(Response::new().add_messages(messages)
+                        .add_attribute("action","repay_fail"))
+                } else {
+                    // Calculate reward
+                    let reward = calculate_reward(offer.start_time, collection.apy, current_time, offer.amount);
+
+                    // Send the NFT to the borrower
+                    let msg = Cw721ExecuteMsg::TransferNft {
+                        recipient: offer.borrower.into(),
+                        token_id: offer.token_id.into(),
+                    };
+                    let execute_msg = CosmosMsg::Wasm(WasmMsg::Execute {
+                        contract_addr: collection.contract.clone().into(),
+                        msg: to_binary(&msg)?,
+                        funds: vec![],
+                    });
+
+                    // Send the repayment amount (loan amount + reward) to the offer owner
+                    let payment_amount = offer.amount + reward;
+
+                    let payment_coin = Coin {
+                        denom: LEND_DENOM.load(deps.storage)?,
+                        amount: payment_amount.into(),
+                    };
+                    let payment_msg = BankMsg::Send {
+                        to_address: offer.owner.into(),
+                        amount: vec![payment_coin],
+                    };
+
+                    // Construct and return the response
+                    let messages: Vec<CosmosMsg> = vec![execute_msg, CosmosMsg::Bank(payment_msg)];
+                    Ok(Response::new().add_messages(messages).add_attribute("action", "repay_success"))
+                }
+               
+            } else {
+                // Collection with the specified collection_id not found
+                return Err(ContractError::CollectionNotFound);
+            }
+        } else {
+            // Handle the case where loading collections failed
+            return Err(ContractError::CollectionLoadFail);
+        }
+    }
+
+    // Function to calculate reward
+    fn calculate_reward(start_time: u64, apy: u16, current_time: u64, amount: u128) -> u128 {
+        // Calculate elapsed time in seconds
+        let elapsed_time_seconds = current_time - start_time;
+
+        let reward = amount * elapsed_time_seconds as u128 * apy as u128 / (365 * 24 * 60 * 60) as u128;
+
+        reward
+    }
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -520,6 +631,10 @@ mod tests {
         let res = execute(deps.as_mut(), env.clone(), info.clone(), update_admin_msg).unwrap();
         let config = CONFIG.load(deps.as_ref().storage).unwrap();
         assert_eq!(config.admin, new_admin);
+
+        // ************************************************
+
+        // add new admin
     }
 
 

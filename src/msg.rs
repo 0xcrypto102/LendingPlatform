@@ -17,6 +17,7 @@ pub enum ExecuteMsg {
     UpdateFloorPrice { collection_id: u16, new_floor_price: u128 },
     AddNFTCollection { collection: NFTCollectionResp },
     UpdateAdmin { new_admin: Addr },
+    RepaySuccess {offer_id: u16},
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]

@@ -12,6 +12,9 @@ pub enum ContractError {
     #[error("Invalid NFT Owner")]
     InvalidNftOwner,
 
+    #[error("Invalid Borrower")]
+    InvalidBorrow,
+
     #[error("Lend amount should be less than floor price of collection")]
     TooMuchLendAmount,
     
@@ -29,4 +32,7 @@ pub enum ContractError {
 
     #[error("Offer already accepted")]
     OfferAlreadyAccepted,
+
+    #[error("Offer Not accepted")]
+    OfferNotAccepted,
 }

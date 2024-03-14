@@ -23,7 +23,10 @@ pub enum ExecuteMsg {
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub enum QueryMsg {
     OfferList { limit: Option<u32>, start_after: Option<u16> },
+    OfferByID {offer_id: u16},
     // OfferListByOwner { owner: Addr },
+    CollectionList {},
+    QueryAdmin {},
 }
 
 

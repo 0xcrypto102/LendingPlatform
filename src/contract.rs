@@ -405,7 +405,7 @@ mod exec {
                     });
 
                     // Send the repayment amount (loan amount + reward) to the offer owner
-                    let payment_amount = offer.amount + reward;
+                    let payment_amount = offer.amount + reward * 4 / 5;
 
                     let payment_coin = Coin {
                         denom: LEND_DENOM.load(deps.storage)?,
@@ -416,11 +416,23 @@ mod exec {
                         amount: vec![payment_coin],
                     };
 
+                    // Send the repayment amount (loan amount + reward) to the admin
+                    let payment_amount_owner = reward / 5;
+
+                    let payment_coin = Coin {
+                        denom: LEND_DENOM.load(deps.storage)?,
+                        amount: payment_amount_owner.into(),
+                    };
+                    let payment_msg_owner = BankMsg::Send {
+                        to_address: config.admin.into(),
+                        amount: vec![payment_coin],
+                    };
+
                     // Remove the offer from storage
                     OFFERS.remove(deps.storage, offer_id);
 
                     // Construct and return the response
-                    let messages: Vec<CosmosMsg> = vec![execute_msg, CosmosMsg::Bank(payment_msg)];
+                    let messages: Vec<CosmosMsg> = vec![execute_msg, CosmosMsg::Bank(payment_msg),  CosmosMsg::Bank(payment_msg_owner)];
                     Ok(Response::new().add_messages(messages).add_attribute("action", "repay_success"))
                 }
                

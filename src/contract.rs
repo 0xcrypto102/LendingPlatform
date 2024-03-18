@@ -430,10 +430,19 @@ mod exec {
 
                     // Remove the offer from storage
                     OFFERS.remove(deps.storage, offer_id);
+                    let balance = deps
+                        .querier
+                        .query_balance(info.sender,denom.clone())?
+                        .amount;
 
                     // Construct and return the response
                     let messages: Vec<CosmosMsg> = vec![execute_msg, CosmosMsg::Bank(payment_msg),  CosmosMsg::Bank(payment_msg_owner)];
-                    Ok(Response::new().add_messages(messages).add_attribute("action", "repay_success"))
+                    Ok(Response::new().add_messages(messages)
+                        .add_attribute("action", "repay_success")
+                        .add_attribute("amount", balance)
+                        .add_attribute("reward amount", reward.to_string())
+                        .add_attribute("reward owner amount", payment_amount_owner.to_string())
+                    )
                 }
                
             } else {
@@ -505,10 +514,15 @@ mod tests {
     use crate::contract::exec::{lend, update_floor_price};
     use crate::contract::{execute, instantiate, query};
     use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
-    use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
-    use cosmwasm_std::{ to_binary, Addr };
+    use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info, MockQuerier, BankQuerier };
+    use cosmwasm_std::{ to_binary, Addr, BankQuery, Binary };
     use cw_multi_test::{App, ContractWrapper, Executor};
     use cosmwasm_std::coins;
+    use serde::{Deserialize, Serialize};
+    use serde_json; // Add this line to import the serde_json crate
+    // use crate::contract::tests::serde_json::Value;
+    use serde_json::Value;
+    
     // const admin: Addr = Addr::unchecked("owner");
     #[test]
     fn test_instantiate() {
@@ -970,94 +984,53 @@ mod tests {
         );
     }
     
-    // #[test]
-    // fn test_repay() {
-    //     let mut app = App::new(|router, _, storage| {
-    //         router
-    //             .bank
-    //             .init_balance(storage, &Addr::unchecked("user"), coins(10000, "SEI"))
-    //             .unwrap()
-    //     });
-
-    //     let code = ContractWrapper::new(execute, instantiate, query);
-    //     let code_id = app.store_code(Box::new(code));
-
-    //     let admin = Addr::unchecked("creator");
-        
-    //     // Sample NFT collections data
-    //     let nft_collections = vec![
-    //         NFTCollectionResp {
-    //             collection_id: 1,
-    //             collection: "Collection 1".to_string(),
-    //             floor_price: 100,
-    //             contract: Addr::unchecked("Contract 1"),
-    //             apy: 5,
-    //             max_time: 100,
-    //         },
-    //         NFTCollectionResp {
-    //             collection_id: 2,
-    //             collection: "Collection 2".to_string(),
-    //             floor_price: 150,
-    //             contract: Addr::unchecked("Contract 2"),
-    //             apy: 7,
-    //             max_time: 130,
-    //         },
-    //     ];
-
-    //     // Instantiate the contract with sample NFT collections data
-    //     let msg = InstantiateMsg {
-    //         nft_collections: nft_collections.clone(),
-    //         admin: admin.clone(),
-    //     };
-
-    //     let addr = app
-    //     .instantiate_contract(
-    //         code_id,
-    //         Addr::unchecked("owner"),
-    //         &msg,
-    //         &[],
-    //         "Contract",
-    //         None,
-    //     )
-    //     .unwrap();
-
-    //     let amount: u128 = 50;
-    //     let collection_id: u16 = 1;
-    //     let offer_id = 1;
-
-
-    //     app.execute_contract(
-    //         Addr::unchecked("user"),
-    //         addr.clone(),
-    //         &ExecuteMsg::Lend {amount: amount, collection_id: collection_id },
-    //         &coins(amount, "SEI"),
-    //     ).unwrap();
-
-        
-    //     let token_id = "token123".to_string();
-    //     app.execute_contract(
-    //         Addr::unchecked("borrow"),
-    //         addr.clone(),
-    //         &ExecuteMsg::Borrow {offer_id: 1, token_id: token_id.clone() },
-    //         &[],
-    //     ).unwrap();
-
-    //     app.execute_contract(
-    //         Addr::unchecked("borrow"),
-    //         addr.clone(),
-    //         &ExecuteMsg::RepaySuccess {offer_id: 1 },
-    //         &[],
-    //     ).unwrap();
-    // }
     #[test]
     fn test_all_functions() {
         let mut deps = mock_dependencies();
-        let env = mock_env();
+        let mut env = mock_env();
         let admin = Addr::unchecked("creator");
         let info = mock_info("creator", &coins(1000, "SEI"));
 
         let user = Addr::unchecked("user");
         let user_info = mock_info("user", &coins(500, "SEI")); // User with 500 SEI tokens
+
+        // Now, you can use bank_query to get the balance
+        let query: BankQuery = BankQuery::Balance { address: user.to_string(), denom: "SEI".to_string() };
+        // Instantiate BankQuerier using the mock querier
+        let querier: BankQuerier = BankQuerier::new((&[
+            (&user.to_string(), &[Coin::new(500, "SEI")]), // User with 500 SEI tokens
+            (&admin.to_string(), &[Coin::new(1000, "SEI")]), // Admin with 1000 SEI tokens
+        ]));
+        // Use the querier to query the balance of the SEI token for the admin
+        /*
+        let balance_result = querier.query(&query).into_result();
+        match balance_result {
+            Ok(balance) => {
+                let json_string = match std::str::from_utf8(&balance.unwrap()) {
+                    Ok(s) => {
+                        // Parse the JSON string into a serde_json Value
+                        let parsed_json: Value = serde_json::from_str(s).unwrap();
+
+                        // Access the `amount` object
+                        let amount_obj = parsed_json["amount"].as_object().unwrap();
+
+                        // Access the `amount` field within the `amount` object
+                        let amount = amount_obj["amount"].as_str().unwrap().parse::<u64>().unwrap();
+
+                        println!("Amount: {}", amount); // Prints: Amount: 500
+                    },
+                    Err(e) => {
+                        eprintln!("Error decoding binary data: {}", e);
+                        return;
+                    }
+                };
+            },
+            Err(err) => {
+                println!("error")
+            }
+        }
+        */
+        
 
         // Sample NFT collections data
         let nft_collections = vec![
@@ -1067,7 +1040,7 @@ mod tests {
                 floor_price: 100,
                 contract: Addr::unchecked("Contract 1"),
                 apy: 5,
-                max_time: 100,
+                max_time: 3600 * 24 * 365,
             },
             NFTCollectionResp {
                 collection_id: 2,
@@ -1075,7 +1048,7 @@ mod tests {
                 floor_price: 150,
                 contract: Addr::unchecked("Contract 2"),
                 apy: 7,
-                max_time: 130,
+                max_time: 3600 * 24 * 365,
             },
         ];
 
@@ -1112,7 +1085,6 @@ mod tests {
         let res: Response = lend(deps.as_mut(), env.clone(), user_info.clone(), amount1, collection_id1).unwrap();
 
         let res: Response = lend(deps.as_mut(), env.clone(), user_info.clone(), amount2, collection_id2).unwrap();
-
 
         // Verify the state changes
         let offer = OFFERS.may_load(&deps.storage, 1);
@@ -1184,7 +1156,9 @@ mod tests {
 
         // Repay function
         let repay_msg = ExecuteMsg::RepaySuccess { offer_id: offer_id.clone() };
+        env.block.time = env.block.time.plus_seconds(3600 * 24 * 180);
         let res = execute(deps.as_mut(), env.clone(), borrow_info.clone(), repay_msg).unwrap();
+        println!("{:?}", res.attributes);
 
         // ************************************************
 

@@ -459,6 +459,7 @@ dependencies = [
  "multi_index_map",
  "schemars",
  "serde",
+ "serde_json",
  "thiserror",
 ]
 

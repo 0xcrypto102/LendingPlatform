@@ -45,6 +45,7 @@ cw-paginate-storage = "=2.3.0"
 cw-storage-plus = "1.1.0"
 cw2 = "1.1.1"
 cw721 = "0.18.0"
+cw721-base = "0.18.0"
 multi_index_map = "0.11.0"
 schemars = "0.8.15"
 serde = { version = "1.0.189", default-features = false, features = ["derive"] }

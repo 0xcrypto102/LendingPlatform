@@ -22,9 +22,14 @@ pub fn instantiate(
     msg: InstantiateMsg,
 ) -> StdResult<Response> {
     let nft_collections = msg.nft_collections;
-    NFT_COLLECTIONS.save(deps.storage, &nft_collections)?;
 
-    let config = ContractConfig { admin: msg.admin };
+    for collection_resp in nft_collections {
+        NFT_COLLECTIONS.save(deps.storage, collection_resp.collection_id, &collection_resp)?;
+    }
+
+    // NFT_COLLECTIONS.save(deps.storage, &nft_collections)?;
+
+    let config = ContractConfig { admin: msg.admin, interest: msg.interest };
     CONFIG.save(deps.storage, &config)?;
 
     LEND_DENOM.save(deps.storage, &"SEI".to_string())?;
@@ -53,6 +58,7 @@ pub fn execute(
         CancelOffer { offer_id } => exec::cancel_offer(
             deps,
             info,
+            env,
             offer_id
         ),
         Borrow { offer_id, token_id} => exec::borrow (
@@ -78,6 +84,11 @@ pub fn execute(
             info,
             new_admin
         ),
+        UpdateInterest { interest } => exec::update_interest(
+            deps,
+            info,
+            interest
+        ),
         RepaySuccess { offer_id } => exec::repay_success (
             deps,
             info,
@@ -102,25 +113,13 @@ mod exec {
         let contract_address = env.contract.address.clone();
 
         // Get the collection associated with the offer
-        let collections_option = NFT_COLLECTIONS.may_load(deps.storage)?;
+        let collection = match NFT_COLLECTIONS.may_load(deps.storage, collection_id)? {
+            Some(collection) => collection,
+            None => return Err(ContractError::CollectionNotFound),
+        };
 
-        // Check if loading collections was successful
-        if let Some(collections) = collections_option {
-            // Find the collection with the specified collection_id
-            let collection_option = collections.iter().find(|collection| collection.collection_id == collection_id);
- 
-            // Check if the collection with the specified collection_id exists
-            if let Some(collection) = collection_option {
-                if collection.floor_price < amount {
-                    return Err(ContractError::TooMuchLendAmount)
-                }
-            } else {
-                // Collection with the specified collection_id not found
-                return Err(ContractError::CollectionNotFound);
-            }
-        } else {
-            // Handle the case where loading collections failed
-            return Err(ContractError::CollectionLoadFail);
+        if collection.floor_price < amount {
+            return Err(ContractError::TooMuchLendAmount)
         }
     
         let start_time = env.block.time.seconds();
@@ -138,7 +137,7 @@ mod exec {
 
         // Create BankMsg::Send message with the desired lending amount
         let message = BankMsg::Send {
-            to_address: contract_address.into_string(),
+            to_address: contract_address.clone().into_string(),
             amount: vec![Coin {
                 denom: denom.to_string(), // Denomination of the payment amount
                 amount: amount.into(),    // Payment amount
@@ -148,10 +147,23 @@ mod exec {
         // Save the offer and update the last offer index
         OFFERS.save(deps.storage, offer.offer_id, &offer)?;
         LAST_OFFER_INDEX.save(deps.storage, &(offer_index + 1))?;
+
+        // let balance = deps
+        //         .querier
+        //         .query_balance(info.sender,denom.clone())?
+        //         .amount;
+
+        // let contract_balance = deps
+        //         .querier
+        //         .query_balance(contract_address.clone(),denom.clone())?
+        //         .amount;
+            
             
         // Return the BankMsg::Send message as a response
         Ok(Response::new()
             .add_message(message)
+            // .add_attribute("current user balance", balance)
+            // .add_attribute("current contract balance", contract_balance)
             .add_attribute("action", "lend"))
         
     }
@@ -159,11 +171,14 @@ mod exec {
     pub fn cancel_offer(
         deps: DepsMut,
         info: MessageInfo,
+        env: Env,
         offer_id: u16
     ) -> Result<Response, ContractError> {
         // Load the denom
         let denom = LEND_DENOM.load(deps.storage)?;
         let config = CONFIG.load(deps.storage)?;
+        let contract_address = env.contract.address.clone();
+
 
         // Load the offer from storage
         let offer = match OFFERS.may_load(deps.storage, offer_id)? {
@@ -184,21 +199,32 @@ mod exec {
 
         // Repay the amount to the sender
         let message = BankMsg::Send {
-            to_address: info.sender.to_string(),
+            to_address: offer.owner.to_string(),
             amount: vec![Coin {
                 denom: denom.to_string(),
                 amount: offer.amount.into(),
             }],
         };
 
+        let balance = deps
+            .querier
+            .query_balance(offer.owner,denom.clone())?
+            .amount;
+
+        let contract_balance = deps
+            .querier
+            .query_balance(contract_address.clone(),denom.clone())?
+            .amount;
+        
         // Remove the offer from storage
         OFFERS.remove(deps.storage, offer_id);
             
         // Return a response with the repayment message
         Ok(Response::new()
             .add_message(message)
+            .add_attribute("current user balance", balance)
+            .add_attribute("current contract balance", contract_balance)
             .add_attribute("action", "cancel_offer")
-            .add_attribute("amount", offer.amount.to_string())
             .add_attribute("denom", denom))
     }
 
@@ -209,6 +235,7 @@ mod exec {
         offer_id: u16,
         token_id: String,
     ) -> Result<Response, ContractError> {
+        let denom = LEND_DENOM.load(deps.storage)?;
         // Load the offer from storage
         let mut offer = match OFFERS.may_load(deps.storage, offer_id)? {
             Some(offer) => offer,
@@ -222,51 +249,46 @@ mod exec {
         }
 
         // Get the collection associated with the offer
-        let collections_option = NFT_COLLECTIONS.may_load(deps.storage)?;
+        let collection = match NFT_COLLECTIONS.may_load(deps.storage, offer.collection_id)? {
+            Some(collection) => collection,
+            None => return Err(ContractError::CollectionNotFound),
+        };
+        
+        // Send the NFT to the contract address
+        let msg = Cw721ExecuteMsg::TransferNft {
+            recipient: contract_address.to_string(),
+            token_id: token_id.to_string(),
+        };
 
-        // Check if loading collections was successful
-        if let Some(collections) = collections_option {
-            // Find the collection with the specified collection_id
-            let collection_option = collections.iter().find(|collection| collection.collection_id == offer.collection_id);
+        // let execute_msg = CosmosMsg::Wasm(WasmMsg::Execute {
+        //     contract_addr: collection.contract.to_string(),
+        //     msg: to_binary(&msg)?,
+        //     funds: vec![],
+        // });
 
-            // Check if the collection with the specified collection_id exists
-            if let Some(collection) = collection_option {
-                // Send the NFT to the contract address
-                let msg = Cw721ExecuteMsg::TransferNft {
-                    recipient: contract_address.to_string(),
-                    token_id: token_id.to_string(),
-                };
+        let fund_msg = BankMsg::Send {
+            to_address: info.sender.clone().into_string(),
+            amount: vec![Coin {
+                denom: denom.to_string(), // Denomination of the payment amount
+                amount: offer.amount.into(),    // Payment amount
+            }],
+        };
+    
+        // let messages: Vec<CosmosMsg> = vec![CosmosMsg::Bank(fund_msg), execute_msg];
+        let messages: Vec<CosmosMsg> = vec![CosmosMsg::Bank(fund_msg)];
 
-                let execute_msg = CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: collection.contract.to_string(),
-                    msg: to_binary(&msg)?,
-                    funds: vec![],
-                });
-                
-                let messages: Vec<CosmosMsg> = vec![execute_msg];
-                let _response = Response::new().add_messages(messages);
-                
-                // Update the offer's token_id and accepted fields
-                offer.token_id = token_id;
-                offer.accepted = true;
-                offer.borrower = info.sender;
+        // Update the offer's token_id and accepted fields
+        offer.token_id = token_id;
+        offer.accepted = true;
+        offer.borrower = info.sender;
 
-                // Save the updated offer back to storage
-                OFFERS.save(deps.storage, offer_id, &offer)?;
+        // Save the updated offer back to storage
+        OFFERS.save(deps.storage, offer_id, &offer)?;
 
-                // Return success response
-                Ok(Response::new()
-                    .add_attribute("action", "borrow"))
-            } else {
-                // Collection with the specified collection_id not found
-                return Err(ContractError::CollectionNotFound);
-            }
-        } else {
-            // Handle the case where loading collections failed
-            return Err(ContractError::CollectionLoadFail);
-        }
-
-       
+        // Return success response
+        Ok(Response::new()
+            .add_messages(messages)
+            .add_attribute("action", "borrow"))
     }
 
     pub fn update_floor_price(
@@ -280,23 +302,20 @@ mod exec {
         if config.admin != info.sender {
             return Err(ContractError::Unauthorized);
         }
-        // Get the collection associated with the offer
-        let mut collections = NFT_COLLECTIONS.load(deps.storage)?;
 
-        // Find the collection with the specified collection_id
-        if let Some(collection) = collections.iter_mut().find(|collection| collection.collection_id == collection_id) {
-            // Update the floor price of the collection
-            collection.floor_price = new_floor_price;
+        let mut collection = match NFT_COLLECTIONS.may_load(deps.storage, collection_id)? {
+            Some(collection) => collection,
+            None => return Err(ContractError::CollectionNotFound),
+        };
 
-            // Save the updated collection back to storage
-            NFT_COLLECTIONS.save(deps.storage, &collections)?;
+        // Update the floor price of the collection
+        collection.floor_price = new_floor_price;
 
-            Ok(Response::new()
-                .add_attribute("action", "update_floor_price"))
-        } else {
-            // Collection with the specified collection_id not found
-            Err(ContractError::CollectionNotFound)
-        }
+        // Save the updated collection back to storage
+        NFT_COLLECTIONS.save(deps.storage, collection_id, &collection)?;
+
+        Ok(Response::new()
+            .add_attribute("action", "update_floor_price"))
     }
 
     pub fn add_nft_collection(
@@ -310,10 +329,7 @@ mod exec {
             return Err(ContractError::Unauthorized);
         }
 
-        let mut collections = NFT_COLLECTIONS.load(deps.storage)?;
-        collections.push(collection);
-
-        let _= NFT_COLLECTIONS.save(deps.storage, &collections);
+        let _ = NFT_COLLECTIONS.save(deps.storage,collection.collection_id,  &collection);
 
         Ok(Response::new()
                 .add_attribute("action", "add_nft_collection"))
@@ -336,6 +352,23 @@ mod exec {
                 .add_attribute("action", "update_admin"))
     }
 
+    pub fn update_interest(
+        deps: DepsMut,
+        info: MessageInfo,
+        interest: u128
+    ) -> Result<Response, ContractError> {
+        let mut config = CONFIG.load(deps.storage)?;
+
+        if config.admin != info.sender {
+            return Err(ContractError::Unauthorized);
+        }
+    
+        config.interest = interest;
+        CONFIG.save(deps.storage, &config)?;
+        Ok(Response::new()
+            .add_attribute("action", "update_interest"))
+    }
+ 
     pub fn repay_success(
         deps: DepsMut,
         info: MessageInfo,
@@ -362,96 +395,101 @@ mod exec {
         }
 
         // Get the collection associated with the offer
-        let collections_option = NFT_COLLECTIONS.may_load(deps.storage)?;
+        let collection = match NFT_COLLECTIONS.may_load(deps.storage, offer.collection_id)? {
+            Some(collection) => collection,
+            None => return Err(ContractError::CollectionNotFound),
+        };
 
-        // Check if loading collections was successful
-        if let Some(collections) = collections_option {
-            // Find the collection with the specified collection_id
-            let collection_option = collections.iter().find(|collection| collection.collection_id == offer.collection_id);
+        let current_time = env.block.time.seconds();
+        // this is the case when the borrow couldn't repay fund in time
+        if offer.start_time + collection.max_time < current_time {
+            //  Send the NFT to the contract address
+            let msg = Cw721ExecuteMsg::TransferNft {
+                recipient: config.admin.to_string(),
+                token_id: offer.token_id.to_string(),
+            };
 
-            // Check if the collection with the specified collection_id exists
-            if let Some(collection) = collection_option {
+            let execute_msg = CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: collection.contract.to_string(),
+                msg: to_binary(&msg)?,
+                funds: vec![],
+            });
+            
+            let messages: Vec<CosmosMsg> = vec![execute_msg];
+            // Offer remove
+            OFFERS.remove(deps.storage, offer_id);
 
-                let current_time = env.block.time.seconds();
-                if (offer.start_time + collection.max_time) < current_time {
-                    //  Send the NFT to the contract address
-                    let msg = Cw721ExecuteMsg::TransferNft {
-                        recipient: config.admin.to_string(),
-                        token_id: offer.token_id.to_string(),
-                    };
-
-                    let execute_msg = CosmosMsg::Wasm(WasmMsg::Execute {
-                        contract_addr: collection.contract.to_string(),
-                        msg: to_binary(&msg)?,
-                        funds: vec![],
-                    });
-                    
-                    let messages: Vec<CosmosMsg> = vec![execute_msg];
-                    Ok(Response::new().add_messages(messages)
-                        .add_attribute("action","repay_fail"))
-                } else {
-                    // Calculate reward
-                    let reward = calculate_reward(offer.start_time, collection.apy, current_time, offer.amount);
-
-                    // Send the NFT to the borrower
-                    let msg = Cw721ExecuteMsg::TransferNft {
-                        recipient: offer.borrower.into(),
-                        token_id: offer.token_id.into(),
-                    };
-                    let execute_msg = CosmosMsg::Wasm(WasmMsg::Execute {
-                        contract_addr: collection.contract.clone().into(),
-                        msg: to_binary(&msg)?,
-                        funds: vec![],
-                    });
-
-                    // Send the repayment amount (loan amount + reward) to the offer owner
-                    let payment_amount = offer.amount + reward * 4 / 5;
-
-                    let payment_coin = Coin {
-                        denom: LEND_DENOM.load(deps.storage)?,
-                        amount: payment_amount.into(),
-                    };
-                    let payment_msg = BankMsg::Send {
-                        to_address: offer.owner.into(),
-                        amount: vec![payment_coin],
-                    };
-
-                    // Send the repayment amount (loan amount + reward) to the admin
-                    let payment_amount_owner = reward / 5;
-
-                    let payment_coin = Coin {
-                        denom: LEND_DENOM.load(deps.storage)?,
-                        amount: payment_amount_owner.into(),
-                    };
-                    let payment_msg_owner = BankMsg::Send {
-                        to_address: config.admin.into(),
-                        amount: vec![payment_coin],
-                    };
-
-                    // Remove the offer from storage
-                    OFFERS.remove(deps.storage, offer_id);
-                    let balance = deps
-                        .querier
-                        .query_balance(info.sender,denom.clone())?
-                        .amount;
-
-                    // Construct and return the response
-                    let messages: Vec<CosmosMsg> = vec![execute_msg, CosmosMsg::Bank(payment_msg),  CosmosMsg::Bank(payment_msg_owner)];
-                    Ok(Response::new().add_messages(messages)
-                        .add_attribute("action", "repay_success")
-                        .add_attribute("amount", balance)
-                        .add_attribute("reward amount", reward.to_string())
-                        .add_attribute("reward owner amount", payment_amount_owner.to_string())
-                    )
-                }
-               
-            } else {
-                // Collection with the specified collection_id not found
-                return Err(ContractError::CollectionNotFound);
-            }
+            Ok(Response::new().add_messages(messages)
+                .add_attribute("action","repay_fail"))
+                
+            // Ok(Response::new()
+            // .add_attribute("action","repay_fail"))
         } else {
-            // Handle the case where loading collections failed
-            return Err(ContractError::CollectionLoadFail);
+            // Calculate reward
+            let reward = calculate_reward(offer.start_time, collection.apy, current_time, offer.amount);
+
+            // Send the NFT to the borrower
+            let msg = Cw721ExecuteMsg::TransferNft {
+                recipient: offer.borrower.into(),
+                token_id: offer.token_id.into(),
+            };
+            let execute_msg = CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: collection.contract.clone().into(),
+                msg: to_binary(&msg)?,
+                funds: vec![Coin {
+                    denom: LEND_DENOM.load(deps.storage)?,
+                    amount: (offer.amount + reward).into(),
+                }],
+            });
+            
+
+            // Send the repayment amount (loan amount + reward) to the offer owner
+            let payment_amount = offer.amount + reward * config.interest / 100;
+
+            let payment_coin = Coin {
+                denom: LEND_DENOM.load(deps.storage)?,
+                amount: payment_amount.into(),
+            };
+            let payment_msg = BankMsg::Send {
+                to_address: offer.owner.into(),
+                amount: vec![payment_coin],
+            };
+
+            // Send the repayment amount (loan amount + reward) to the admin
+            let payment_amount_owner = reward * (100 - config.interest) / 100;
+
+            let payment_coin = Coin {
+                denom: LEND_DENOM.load(deps.storage)?,
+                amount: payment_amount_owner.into(),
+            };
+
+            let payment_msg_owner = BankMsg::Send {
+                to_address: config.admin.into(),
+                amount: vec![payment_coin],
+            };
+
+            let balance = deps
+                .querier
+                .query_balance(info.sender,denom.clone())?
+                .amount;
+
+            // Remove the offer from storage
+            OFFERS.remove(deps.storage, offer_id);
+            
+
+            // Construct and return the response
+            // let messages: Vec<CosmosMsg> = vec![execute_msg, CosmosMsg::Bank(payment_msg),  CosmosMsg::Bank(payment_msg_owner)];
+            // let messages: Vec<CosmosMsg> = vec![CosmosMsg::Bank(payment_msg),  CosmosMsg::Bank(payment_msg_owner)];
+
+            Ok(Response::new()
+                .add_message(execute_msg)
+                .add_message(payment_msg)
+                .add_message(payment_msg_owner)
+                .add_attribute("action", "repay_success")
+                .add_attribute("borrow amount", balance)
+                .add_attribute("reward amount", reward.to_string())
+                .add_attribute("reward owner amount", payment_amount_owner.to_string())
+            )
         }
     }
 
@@ -473,9 +511,11 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         OfferList {limit, start_after} => query::offer_list(deps, limit, start_after),
         OfferByID {offer_id} => query::offer_by_id(deps, offer_id),
-        CollectionList {} => query::collection_list(deps),
+        // CollectionList {} => query::collection_list(deps),
+        CollectionByID {collection_id} => query::collection_by_id(deps, collection_id),
         QueryAdmin {} => query::query_admin(deps),
         // OfferListByOwner { owner } => query::offer_list_by_owner(deps, owner),
+        // QueryBalance {} => query::query_balace(deps, info),
     }
 }
 
@@ -493,713 +533,38 @@ mod query {
         Ok(resp_binary)
     }
 
-    pub fn collection_list(deps: Deps) -> StdResult<Binary> {
-        let collections = NFT_COLLECTIONS.load(deps.storage)?;
-        let resp = NFTCollectionListResp { nftcollections: collections };
-        let resp_binary = to_binary(&resp)?;
+    // pub fn collection_list(deps: Deps) -> StdResult<Binary> {
+    //     let collections = NFT_COLLECTIONS.load(deps.storage)?;
+    //     let resp = NFTCollectionListResp { nftcollections: collections };
+    //     let resp_binary = to_binary(&resp)?;
+    //     Ok(resp_binary)
+    // }
+
+    pub fn collection_by_id(deps: Deps, collection_id: u16) -> StdResult<Binary> {
+        let collection = NFT_COLLECTIONS.load(deps.storage, collection_id)?;
+        let resp_binary = to_binary(&collection)?;
         Ok(resp_binary)
     }
+
 
     pub fn query_admin(deps: Deps) -> StdResult<Binary> {
         let admin = CONFIG.load(deps.storage)?;
-        let resp = ContractConfig { admin: admin.clone().admin };
+        let resp = ContractConfig { admin: admin.clone().admin, interest: admin.clone().interest };
         let resp_binary = to_binary(&resp)?;
         Ok(resp_binary)
     }
+
+    // pub fn query_balace(deps: Deps, info: MessageInfo) -> StdResult<Binary> {
+    //     let denom = LEND_DENOM.load(deps.storage)?;
+    //     let balance = deps
+    //         .querier
+    //         .query_balance(info.sender,denom.clone())?
+    //         .amount;
+    //     Ok(to_binary(&balance)?)
+    // }
  }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::contract::exec::{lend, update_floor_price};
-    use crate::contract::{execute, instantiate, query};
-    use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
-    use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info, MockQuerier, BankQuerier };
-    use cosmwasm_std::{ to_binary, Addr, BankQuery, Binary };
-    use cw_multi_test::{App, ContractWrapper, Executor};
-    use cosmwasm_std::coins;
-    use serde::{Deserialize, Serialize};
-    use serde_json; // Add this line to import the serde_json crate
-    // use crate::contract::tests::serde_json::Value;
-    use serde_json::Value;
-    
-    // const admin: Addr = Addr::unchecked("owner");
-    #[test]
-    fn test_instantiate() {
-        let mut app = App::default();
 
-        let code = ContractWrapper::new(execute, instantiate, query);
-        let code_id = app.store_code(Box::new(code));
-
-        let admin = Addr::unchecked("creator");
-        // Sample NFT collections data
-        let nft_collections = vec![
-            NFTCollectionResp {
-                collection_id: 1,
-                collection: "Collection 1".to_string(),
-                floor_price: 100,
-                contract: Addr::unchecked("Contract 1"),
-                apy: 5,
-                max_time: 100,
-            },
-            NFTCollectionResp {
-                collection_id: 2,
-                collection: "Collection 2".to_string(),
-                floor_price: 150,
-                contract: Addr::unchecked("Contract 2"),
-                apy: 7,
-                max_time: 130,
-            },
-        ];
-
-        // Instantiate the contract with sample NFT collections data
-        let msg = InstantiateMsg {
-            nft_collections: nft_collections.clone(),
-            admin: admin.clone(),
-        };
-
-        let addr = app
-        .instantiate_contract(
-            code_id,
-            Addr::unchecked("owner"),
-            &msg,
-            &[],
-            "Contract",
-            None,
-        )
-        .unwrap();
-
-        let resp: NFTCollectionListResp = app
-            .wrap()
-            .query_wasm_smart(addr, &QueryMsg::CollectionList {})
-            .unwrap();
-        assert_eq!(
-            resp,
-            NFTCollectionListResp {
-                nftcollections: vec![
-                    NFTCollectionResp {
-                        collection_id: 1,
-                        collection: "Collection 1".to_string(),
-                        floor_price: 100,
-                        contract: Addr::unchecked("Contract 1"),
-                        apy: 5,
-                        max_time: 100,
-                    },
-                    NFTCollectionResp {
-                        collection_id: 2,
-                        collection: "Collection 2".to_string(),
-                        floor_price: 150,
-                        contract: Addr::unchecked("Contract 2"),
-                        apy: 7,
-                        max_time: 130,
-                    },
-                ]
-            }
-        );
-       
-    }
-    
-    #[test]
-    fn test_lend() {
-        let mut app = App::new(|router, _, storage| {
-            router
-                .bank
-                .init_balance(storage, &Addr::unchecked("user"), coins(10000, "SEI"))
-                .unwrap()
-        });
-
-        let code = ContractWrapper::new(execute, instantiate, query);
-        let code_id = app.store_code(Box::new(code));
-
-        let env = mock_env();
-
-        let admin = Addr::unchecked("creator");
-        // Sample NFT collections data
-        let nft_collections = vec![
-            NFTCollectionResp {
-                collection_id: 1,
-                collection: "Collection 1".to_string(),
-                floor_price: 100,
-                contract: Addr::unchecked("Contract 1"),
-                apy: 5,
-                max_time: 100,
-            },
-            NFTCollectionResp {
-                collection_id: 2,
-                collection: "Collection 2".to_string(),
-                floor_price: 150,
-                contract: Addr::unchecked("Contract 2"),
-                apy: 7,
-                max_time: 130,
-            },
-        ];
-
-        // Instantiate the contract with sample NFT collections data
-        let msg = InstantiateMsg {
-            nft_collections: nft_collections.clone(),
-            admin: admin.clone(),
-        };
-
-        let addr = app
-        .instantiate_contract(
-            code_id,
-            Addr::unchecked("owner"),
-            &msg,
-            &[],
-            "Contract",
-            None,
-        )
-        .unwrap();
-
-        let amount1: u128 = 50;
-        let amount2: u128 = 80;
-
-        let collection_id1: u16 = 1;
-        let collection_id2: u16 = 2;
-
-        app.execute_contract(
-            Addr::unchecked("user"),
-            addr.clone(),
-            &ExecuteMsg::Lend {amount: amount1, collection_id: collection_id1 },
-            &coins(amount1, "SEI"),
-        ).unwrap();
-
-        app.execute_contract(
-            Addr::unchecked("user"),
-            addr.clone(),
-            &ExecuteMsg::Lend {amount: amount2, collection_id: collection_id2 },
-            &coins(amount2, "SEI"),
-        ).unwrap();
-
-        let resp: OfferResp = app
-            .wrap()
-            .query_wasm_smart(addr, &QueryMsg::OfferByID {offer_id: 1})
-            .unwrap();
-
-        assert_eq!(
-            resp.offer_id,
-            1
-        );
-        assert_eq!(
-            resp.collection_id,
-            1
-        );
-        assert_eq!(
-            resp.owner,
-            Addr::unchecked("user")
-        );
-    }
-    // Define a unit test to test the instantiate function
-    
-    #[test]
-    fn test_cancel_offer() {
-        let mut app = App::new(|router, _, storage| {
-            router
-                .bank
-                .init_balance(storage, &Addr::unchecked("user"), coins(10000, "SEI"))
-                .unwrap()
-        });
-
-
-        let code = ContractWrapper::new(execute, instantiate, query);
-        let code_id = app.store_code(Box::new(code));
-
-        let admin = Addr::unchecked("creator");
-        // Sample NFT collections data
-        let nft_collections = vec![
-            NFTCollectionResp {
-                collection_id: 1,
-                collection: "Collection 1".to_string(),
-                floor_price: 100,
-                contract: Addr::unchecked("Contract 1"),
-                apy: 5,
-                max_time: 100,
-            },
-            NFTCollectionResp {
-                collection_id: 2,
-                collection: "Collection 2".to_string(),
-                floor_price: 150,
-                contract: Addr::unchecked("Contract 2"),
-                apy: 7,
-                max_time: 130,
-            },
-        ];
-
-        // Instantiate the contract with sample NFT collections data
-        let msg = InstantiateMsg {
-            nft_collections: nft_collections.clone(),
-            admin: admin.clone(),
-        };
-
-        let addr = app
-        .instantiate_contract(
-            code_id,
-            Addr::unchecked("owner"),
-            &msg,
-            &[],
-            "Contract",
-            None,
-        )
-        .unwrap();
-
-        let amount: u128 = 50;
-        let collection_id: u16 = 1;
-        let offer_id = 1;
-
-
-        app.execute_contract(
-            Addr::unchecked("user"),
-            addr.clone(),
-            &ExecuteMsg::Lend {amount: amount, collection_id: collection_id },
-            &coins(amount, "SEI"),
-        ).unwrap();
-
-        let resp: OfferResp = app
-            .wrap()
-            .query_wasm_smart(addr.clone(), &QueryMsg::OfferByID {offer_id: 1})
-            .unwrap();
-
-        assert_eq!(
-            resp.offer_id,
-            1
-        );
-
-        app.execute_contract(
-            Addr::unchecked("user"),
-            addr.clone(),
-            &ExecuteMsg::CancelOffer { offer_id: offer_id },
-            &[]
-        ).unwrap();
-    }
-    
-
-    #[test]
-    fn test_update_floor_price() {
-        let mut app = App::default();
-
-        let code = ContractWrapper::new(execute, instantiate, query);
-        let code_id = app.store_code(Box::new(code));
-
-        let admin = Addr::unchecked("creator");
-        // Sample NFT collections data
-        let nft_collections = vec![
-            NFTCollectionResp {
-                collection_id: 1,
-                collection: "Collection 1".to_string(),
-                floor_price: 100,
-                contract: Addr::unchecked("Contract 1"),
-                apy: 5,
-                max_time: 100,
-            },
-        ];
-
-        // Instantiate the contract with sample NFT collections data
-        let msg = InstantiateMsg {
-            nft_collections: nft_collections.clone(),
-            admin: admin.clone(),
-        };
-
-        let addr = app
-        .instantiate_contract(
-            code_id,
-            Addr::unchecked("owner"),
-            &msg,
-            &[],
-            "Contract",
-            None,
-        )
-        .unwrap();
-
-        app.execute_contract(
-            Addr::unchecked("creator"),
-            addr.clone(),
-            &ExecuteMsg::UpdateFloorPrice {collection_id: 1, new_floor_price: 120 },
-            &[],
-        ).unwrap();
-
-        let resp: NFTCollectionListResp = app
-            .wrap()
-            .query_wasm_smart(addr, &QueryMsg::CollectionList {})
-            .unwrap();
-
-        assert_eq!(
-            resp,
-            NFTCollectionListResp {
-                nftcollections: vec![
-                    NFTCollectionResp {
-                        collection_id: 1,
-                        collection: "Collection 1".to_string(),
-                        floor_price: 120,
-                        contract: Addr::unchecked("Contract 1"),
-                        apy: 5,
-                        max_time: 100,
-                    },
-                ]
-            }
-        );
-       
-    }
-    
-    #[test]
-    fn test_add_new_admin() {
-        let mut app = App::default();
-
-        let code = ContractWrapper::new(execute, instantiate, query);
-        let code_id = app.store_code(Box::new(code));
-
-        let admin = Addr::unchecked("creator");
-        // Sample NFT collections data
-        let nft_collections = vec![
-            NFTCollectionResp {
-                collection_id: 1,
-                collection: "Collection 1".to_string(),
-                floor_price: 100,
-                contract: Addr::unchecked("Contract 1"),
-                apy: 5,
-                max_time: 100,
-            },
-        ];
-
-        // Instantiate the contract with sample NFT collections data
-        let msg = InstantiateMsg {
-            nft_collections: nft_collections.clone(),
-            admin: admin.clone(),
-        };
-
-        let addr = app
-        .instantiate_contract(
-            code_id,
-            Addr::unchecked("owner"),
-            &msg,
-            &[],
-            "Contract",
-            None,
-        )
-        .unwrap();
-
-        let new_admin = Addr::unchecked("UpdateAdmin");
-        app.execute_contract(
-            Addr::unchecked("creator"),
-            addr.clone(),
-            &ExecuteMsg::UpdateAdmin {new_admin: new_admin.clone() },
-            &[],
-        ).unwrap();
-
-        let resp: ContractConfig = app
-        .wrap()
-        .query_wasm_smart(addr, &QueryMsg::QueryAdmin {})
-        .unwrap();
-
-        assert_eq!(
-            resp,
-            ContractConfig {
-                admin: Addr::unchecked("UpdateAdmin")
-            }
-        );
-    }
-    
-    #[test]
-    fn test_borrow() {
-        let mut app = App::new(|router, _, storage| {
-            router
-                .bank
-                .init_balance(storage, &Addr::unchecked("user"), coins(10000, "SEI"))
-                .unwrap()
-        });
-
-        let code = ContractWrapper::new(execute, instantiate, query);
-        let code_id = app.store_code(Box::new(code));
-
-        let admin = Addr::unchecked("creator");
-        
-        // Sample NFT collections data
-        let nft_collections = vec![
-            NFTCollectionResp {
-                collection_id: 1,
-                collection: "Collection 1".to_string(),
-                floor_price: 100,
-                contract: Addr::unchecked("Contract 1"),
-                apy: 5,
-                max_time: 100,
-            },
-            NFTCollectionResp {
-                collection_id: 2,
-                collection: "Collection 2".to_string(),
-                floor_price: 150,
-                contract: Addr::unchecked("Contract 2"),
-                apy: 7,
-                max_time: 130,
-            },
-        ];
-
-        // Instantiate the contract with sample NFT collections data
-        let msg = InstantiateMsg {
-            nft_collections: nft_collections.clone(),
-            admin: admin.clone(),
-        };
-
-        let addr = app
-        .instantiate_contract(
-            code_id,
-            Addr::unchecked("owner"),
-            &msg,
-            &[],
-            "Contract",
-            None,
-        )
-        .unwrap();
-
-        let amount: u128 = 50;
-        let collection_id: u16 = 1;
-        let offer_id = 1;
-
-
-        app.execute_contract(
-            Addr::unchecked("user"),
-            addr.clone(),
-            &ExecuteMsg::Lend {amount: amount, collection_id: collection_id },
-            &coins(amount, "SEI"),
-        ).unwrap();
-
-        
-        let token_id = "token123".to_string();
-        app.execute_contract(
-            Addr::unchecked("borrow"),
-            addr.clone(),
-            &ExecuteMsg::Borrow {offer_id: 1, token_id: token_id.clone() },
-            &[],
-        ).unwrap();
-        let resp: OfferResp = app
-            .wrap()
-            .query_wasm_smart(addr.clone(), &QueryMsg::OfferByID {offer_id: 1})
-            .unwrap();
-
-        assert_eq!(
-            resp.offer_id,
-            1
-        );
-        assert_eq!(
-            resp.borrower,
-            Addr::unchecked("borrow")
-        );
-    }
-    
-    #[test]
-    fn test_all_functions() {
-        let mut deps = mock_dependencies();
-        let mut env = mock_env();
-        let admin = Addr::unchecked("creator");
-        let info = mock_info("creator", &coins(1000, "SEI"));
-
-        let user = Addr::unchecked("user");
-        let user_info = mock_info("user", &coins(500, "SEI")); // User with 500 SEI tokens
-
-        // Now, you can use bank_query to get the balance
-        let query: BankQuery = BankQuery::Balance { address: user.to_string(), denom: "SEI".to_string() };
-        // Instantiate BankQuerier using the mock querier
-        let querier: BankQuerier = BankQuerier::new((&[
-            (&user.to_string(), &[Coin::new(500, "SEI")]), // User with 500 SEI tokens
-            (&admin.to_string(), &[Coin::new(1000, "SEI")]), // Admin with 1000 SEI tokens
-        ]));
-        // Use the querier to query the balance of the SEI token for the admin
-        /*
-        let balance_result = querier.query(&query).into_result();
-        match balance_result {
-            Ok(balance) => {
-                let json_string = match std::str::from_utf8(&balance.unwrap()) {
-                    Ok(s) => {
-                        // Parse the JSON string into a serde_json Value
-                        let parsed_json: Value = serde_json::from_str(s).unwrap();
-
-                        // Access the `amount` object
-                        let amount_obj = parsed_json["amount"].as_object().unwrap();
-
-                        // Access the `amount` field within the `amount` object
-                        let amount = amount_obj["amount"].as_str().unwrap().parse::<u64>().unwrap();
-
-                        println!("Amount: {}", amount); // Prints: Amount: 500
-                    },
-                    Err(e) => {
-                        eprintln!("Error decoding binary data: {}", e);
-                        return;
-                    }
-                };
-            },
-            Err(err) => {
-                println!("error")
-            }
-        }
-        */
-        
-
-        // Sample NFT collections data
-        let nft_collections = vec![
-            NFTCollectionResp {
-                collection_id: 1,
-                collection: "Collection 1".to_string(),
-                floor_price: 100,
-                contract: Addr::unchecked("Contract 1"),
-                apy: 5,
-                max_time: 3600 * 24 * 365,
-            },
-            NFTCollectionResp {
-                collection_id: 2,
-                collection: "Collection 2".to_string(),
-                floor_price: 150,
-                contract: Addr::unchecked("Contract 2"),
-                apy: 7,
-                max_time: 3600 * 24 * 365,
-            },
-        ];
-
-        // Instantiate the contract with sample NFT collections data
-        let msg = InstantiateMsg {
-            nft_collections: nft_collections.clone(),
-            admin: admin.clone(),
-        };
-        let res = instantiate(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
-
-        // Ensure no error in response
-        assert_eq!(0, res.messages.len());
-        assert_eq!(0, res.attributes.len());
-
-        // Ensure NFT collections are stored
-        let collections = NFT_COLLECTIONS.load(deps.as_ref().storage).unwrap();
-        assert_eq!(2, collections.len());
-
-      
-
-        // *************************************************
-
-        // Call the lend function
-
-        // Define parameters for the lend function
-        let amount1: u128 = 50;
-        let amount2: u128 = 80;
-
-        let collection_id1: u16 = 1;
-        let collection_id2: u16 = 2;
-
-        let contract_address = Addr::unchecked("contract");
-        
-        let res: Response = lend(deps.as_mut(), env.clone(), user_info.clone(), amount1, collection_id1).unwrap();
-
-        let res: Response = lend(deps.as_mut(), env.clone(), user_info.clone(), amount2, collection_id2).unwrap();
-
-        // Verify the state changes
-        let offer = OFFERS.may_load(&deps.storage, 1);
-        assert_eq!(offer.unwrap().unwrap().offer_id, 1); // Offer ID starts from 1
-
-        // *************************************************
-        
-        // Update floor Price Test
-        let new_floor_price: u128 = 150;
-        let response =
-         update_floor_price(deps.as_mut(), info.clone(), collection_id1, new_floor_price).unwrap();
-
-        // Verify the response
-        assert_eq!(0, response.messages.len());
-        assert_eq!(1, response.attributes.len());
-        assert_eq!(response.attributes[0], ("action", "update_floor_price"));
-
-        // Verify the updated collection in storage
-        let updated_collections = NFT_COLLECTIONS.load(deps.as_ref().storage).unwrap();
-        assert_eq!(updated_collections[0].floor_price, new_floor_price);
-
-        
-        // *************************************************
-
-        // cancel offer by user
-        let offer_id = 1;
-        let cancel_offer_msg = ExecuteMsg::CancelOffer { offer_id };
-        let res = execute(deps.as_mut(), env.clone(), user_info.clone(), cancel_offer_msg).unwrap();
-        assert!(OFFERS.may_load(deps.as_ref().storage, offer_id).unwrap().is_none());
-
-        // cancel offer by owner
-         let offer_id = 2;
-         let cancel_offer_msg = ExecuteMsg::CancelOffer { offer_id };
-         let res = execute(deps.as_mut(), env.clone(), info.clone(), cancel_offer_msg).unwrap();
-         assert!(OFFERS.may_load(deps.as_ref().storage, offer_id).unwrap().is_none());
-    
-        // *************************************************
-
-        // Call the lend function again 
-
-        // Define parameters for the lend function
-        let amount: u128 = 50;
-
-        let collection_id: u16 = 1;
-
-        let contract_address = Addr::unchecked("contract");
-        
-        let res: Response = lend(deps.as_mut(), env.clone(), user_info.clone(), amount, collection_id).unwrap();
-        // ************************************************
-
-        // Bororw function
-        // Set up mock environment and info
-        let borrow_info = mock_info("borrower", &[]);
-        let offer_id: u16 = 3;
-        let token_id = "token123".to_string();
-        let contract_address = Addr::unchecked("contract");
-
-        let borrow_msg = ExecuteMsg::Borrow { offer_id, token_id: token_id.clone() };
-
-        let res = execute(deps.as_mut(), env.clone(), borrow_info.clone(), borrow_msg).unwrap();
-
-        let updated_offer = OFFERS
-        .load(&deps.storage, offer_id)
-        .expect("failed to load offer");
-        assert_eq!(updated_offer.token_id, token_id);
-        assert_eq!(updated_offer.accepted, true);
-        assert_eq!(updated_offer.borrower, borrow_info.sender);
-        // ************************************************
-
-        // Repay function
-        let repay_msg = ExecuteMsg::RepaySuccess { offer_id: offer_id.clone() };
-        env.block.time = env.block.time.plus_seconds(3600 * 24 * 180);
-        let res = execute(deps.as_mut(), env.clone(), borrow_info.clone(), repay_msg).unwrap();
-        println!("{:?}", res.attributes);
-
-        // ************************************************
-
-        // add nft collection function
-        let collection = NFTCollectionResp {
-            collection_id: 3,
-            collection: "Collection 3".to_string(),
-            floor_price: 200,
-            contract: Addr::unchecked("Contract 3"),
-            apy: 5,
-            max_time: 100,
-        };
-        let add_collection_msg = ExecuteMsg::AddNFTCollection { collection: collection.clone() };
-        let res = execute(deps.as_mut(), env.clone(), info.clone(), add_collection_msg).unwrap();
-        
-        let collections = NFT_COLLECTIONS.load(deps.as_ref().storage).unwrap();
-        assert_eq!(collections.len(), 3);
-        assert_eq!(collections[2], collection);
-
-        // ************************************************
-
-        // add new admin
-        let new_admin = Addr::unchecked("new_admin");
-        let update_admin_msg = ExecuteMsg::UpdateAdmin { new_admin: new_admin.clone() };
-        let res = execute(deps.as_mut(), env.clone(), info.clone(), update_admin_msg).unwrap();
-        let config = CONFIG.load(deps.as_ref().storage).unwrap();
-        assert_eq!(config.admin, new_admin);
-    }
-
-
-    // // Define a unit test to test the query function for OfferList variant
-    // #[test]
-    // fn test_query_offer_list() {
-    //     let (mut deps, env, info) = mock_dependencies_with_custom_querier_and_instantiate(vec![]);
-
-    //     // Call query with OfferList variant
-    //     let query_msg = QueryMsg::OfferList {};
-    //     let res: OfferListResp = query(deps.as_ref(), env.clone(), query_msg).unwrap();
-
-    //     // Ensure empty offers list initially
-    //     assert_eq!(0, res.offers.len());
-    // }
-
-}
+ #[cfg(test)]
+ mod tests {
+ }

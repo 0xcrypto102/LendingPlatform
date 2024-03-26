@@ -7,6 +7,8 @@ pub mod contract;
 mod error;
 pub mod msg;
 pub mod state;
+pub mod integration_tests;
+pub mod helpers;
 
 pub use crate::error::ContractError;
 
@@ -25,7 +27,7 @@ pub fn execute(deps: DepsMut, _env: Env, info: MessageInfo, msg: ExecuteMsg) -> 
 }
 
 #[entry_point]
-pub fn query(deps: Deps, _env: Env, msg: msg::QueryMsg)
+pub fn query(deps: Deps, _env: Env, msg: QueryMsg)
   -> StdResult<Binary>
 {
     contract::query(deps, _env, msg)

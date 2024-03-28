@@ -19,27 +19,30 @@ pub enum ExecuteMsg {
     AddNFTCollection { collection: NFTCollectionResp },
     UpdateAdmin { new_admin: Addr },
     UpdateInterest { interest: u128 },
-    RepaySuccess {offer_id: u16},
+    Repay {offer_id: u16},
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub enum QueryMsg {
-    OfferList { limit: Option<u32>, start_after: Option<u16> },
+    OfferList { start: u16, stop: u16 },
     OfferByID {offer_id: u16},
-    // OfferListByOwner { owner: Addr },
+    OffersByOwner {owner: Addr },
+    OffersAcceptByBorrow {borrower: Addr},
+    OffersByPrice {limit: u128, sort: bool},
     CollectionByID { collection_id: u16 },
     QueryAdmin {},
 }
 
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-pub struct OfferListResp {
-   pub offers: Vec<OfferResp>,
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct NFTCollectionListResp {
    pub nftcollections: Vec<NFTCollectionResp>,
+}
+
+
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+pub struct OfferListResp {
+   pub offers: Vec<OfferResp>,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]

@@ -1,5 +1,6 @@
 use cosmwasm_std::StdError;
 use thiserror::Error;
+use cw_utils::PaymentError;
 
 #[derive(Error, Debug)]
 pub enum ContractError {
@@ -27,6 +28,12 @@ pub enum ContractError {
     #[error("Collections Loading Fail")]
     CollectionLoadFail,
 
+    #[error("DepositFail")]
+    DepositFail,
+
+    #[error("Not Exact amount to lend")]
+    NotExactAmount,
+
     #[error("Offer not found")]
     OfferNotFound,
 
@@ -35,4 +42,5 @@ pub enum ContractError {
 
     #[error("Offer Not accepted")]
     OfferNotAccepted,
+
 }

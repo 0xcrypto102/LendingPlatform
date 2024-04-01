@@ -536,7 +536,7 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
         OfferByID {offer_id} => query::offer_by_id(deps, offer_id),
         OffersByOwner {owner} => query::get_offers_by_owner(deps, owner),
         OffersAcceptByBorrow {borrower} => query::get_offers_accept_by_borrower(deps, borrower),
-        OffersByPrice {limit, sort} => query::get_offers_by_price(deps, limit, sort),
+        OffersByPrice {page, page_size, limit, sort} => query::get_offers_by_price(deps,page, page_size, limit, sort),
         CollectionByID {collection_id} => query::collection_by_id(deps, collection_id),
         QueryAdmin {} => query::query_admin(deps),
     }
@@ -587,12 +587,20 @@ mod query {
         Ok(resp_offers)
     }
 
-    pub fn get_offers_by_price(deps: Deps, limit: u128, sort: bool) -> StdResult<Binary> {
+    pub fn get_offers_by_price(deps: Deps,page:u16, page_size: u16, limit: u128, sort: bool) -> StdResult<Binary> {
         let total_offers = LAST_OFFER_INDEX.load(deps.storage)?; 
         let mut resp_offers = Vec::new();
+        let mut count = 0;
         for i in 1..=total_offers {
             let offer = match OFFERS.may_load(deps.storage, i)? {
-                Some(offer) if offer.amount > limit => resp_offers.push(offer),
+                Some(offer) => {
+                    if offer.amount > limit {
+                        count += 1;
+                        if count > (page - 1) * page_size && count <= page * page_size{
+                            resp_offers.push(offer);
+                        } else { continue; }
+                    }
+                },
                 _ => continue,
             };
         }

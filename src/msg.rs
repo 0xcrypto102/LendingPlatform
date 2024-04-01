@@ -28,7 +28,7 @@ pub enum QueryMsg {
     OfferByID {offer_id: u16},
     OffersByOwner {owner: Addr },
     OffersAcceptByBorrow {borrower: Addr},
-    OffersByPrice {limit: u128, sort: bool},
+    OffersByPrice {page:u16, page_size:u16, limit: u128, sort: bool},
     CollectionByID { collection_id: u16 },
     QueryAdmin {},
 }

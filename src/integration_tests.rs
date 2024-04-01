@@ -683,7 +683,7 @@ mod tests {
         }
     
         #[test]
-        fn query_offers_accept_by_borrower() {
+        fn query_offers_accept() {
             let (mut app, cw_template_contract) = proper_instantiate();
             // Set amount and collection id to make offer
             let amount: u128 = 50;
@@ -801,7 +801,7 @@ mod tests {
 
             let resp: Vec<OfferResp> = app
                 .wrap()
-                .query_wasm_smart(cw_template_contract.addr(), &QueryMsg::OffersByPrice {limit: 85, sort: false})
+                .query_wasm_smart(cw_template_contract.addr(), &QueryMsg::OffersByPrice {page:1, page_size: 10,limit: 85, sort: false})
                 .unwrap();
 
             assert_eq!(
@@ -832,7 +832,28 @@ mod tests {
 
             let resp: Vec<OfferResp> = app
             .wrap()
-            .query_wasm_smart(cw_template_contract.addr(), &QueryMsg::OffersByPrice {limit: 85, sort: true})
+            .query_wasm_smart(cw_template_contract.addr(), &QueryMsg::OffersByPrice {page:1, page_size: 1,limit: 85, sort: false})
+            .unwrap();
+
+        assert_eq!(
+            resp,
+            [
+                OfferResp {
+                    offer_id: 2,
+                    owner: Addr::unchecked("user"),
+                    amount: 90,
+                    start_time: resp[0].start_time,
+                    collection_id: 1,
+                    token_id: "".to_string(),
+                    accepted: false,
+                    borrower: Addr::unchecked("none")
+                }
+            ]
+        );
+
+            let resp: Vec<OfferResp> = app
+            .wrap()
+            .query_wasm_smart(cw_template_contract.addr(), &QueryMsg::OffersByPrice {page:1, page_size: 10, limit: 85, sort: true})
             .unwrap();
 
             assert_eq!(

@@ -72,3 +72,4 @@ pub struct ContractConfig {
     pub admin: Addr,
     pub interest: u128,
 }
+

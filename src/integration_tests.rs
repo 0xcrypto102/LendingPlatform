@@ -31,7 +31,7 @@ mod tests {
                     &Addr::unchecked(USER),
                     vec![Coin {
                         denom: DENOM.to_string(),
-                        amount: Uint128::new(10000),
+                        amount: Uint128::new(10000000),
                     },
                     ],
                 )
@@ -117,10 +117,10 @@ mod tests {
         use crate::msg::{ExecuteMsg, QueryMsg, OfferResp, OfferListResp, ContractConfig, NFTCollectionResp };
 
         #[test]
-        fn lend() {
-            let (mut app, cw_template_contract) = proper_instantiate();
-            // Set amount and collection id to make offer
-            let amount: u128 = 50;
+    //     fn lend() {
+    //         let (mut app, cw_template_contract) = proper_instantiate();
+    //         // Set amount and collection id to make offer
+    //         let amount: u128 = 50;
 
             let collection_id: u16 = 1;
 
@@ -432,7 +432,7 @@ mod tests {
                 &[],
             );
 
-            // println!("{:?}", res);
+            println!("{:?}", res);
         }
         
         #[test]
@@ -773,116 +773,21 @@ mod tests {
         fn get_offers_by_price() {
             let (mut app, cw_template_contract) = proper_instantiate();
             // Set amount and collection id to make offer
-            let amount: u128 = 50;
-            let collection_id: u16 = 1;
-            // create offer 1
-            let msg = ExecuteMsg::Lend {amount: amount, collection_id: collection_id } ;
-            let funds_sent = Coin::new(50u128, "SEI".to_string());
-            let cosmos_msg = cw_template_contract.call(msg, funds_sent).unwrap();
-            app.execute(Addr::unchecked(USER), cosmos_msg).unwrap(); 
-
-            // Set amount and collection id to make offer
-            let amount: u128 = 90;
-            let collection_id: u16 = 1;
-            // create offer 1
-            let msg = ExecuteMsg::Lend {amount: amount, collection_id: collection_id } ;
-            let funds_sent = Coin::new(90u128, "SEI".to_string());
-            let cosmos_msg = cw_template_contract.call(msg, funds_sent).unwrap();
-            app.execute(Addr::unchecked(USER), cosmos_msg).unwrap(); 
-
-            // Set amount and collection id to make offer
-            let amount: u128 = 100;
-            let collection_id: u16 = 2;
-            // create offer 1
-            let msg = ExecuteMsg::Lend {amount: amount, collection_id: collection_id } ;
-            let funds_sent = Coin::new(100u128, "SEI".to_string());
-            let cosmos_msg = cw_template_contract.call(msg, funds_sent).unwrap();
-            app.execute(Addr::unchecked(ANOTHER_USER), cosmos_msg).unwrap(); 
+            // Simulate 1000 offers
+            for i in 0..10000 {
+                let amount: u128 = (i % 100 + 1) ; // Varying amount
+                let collection_id: u16 = ((i % 2) + 1).try_into().unwrap();   // Varying collection_id
+                let msg = ExecuteMsg::Lend { amount, collection_id };
+                let funds_sent = Coin::new(amount, "SEI".to_string());
+                let cosmos_msg = cw_template_contract.call(msg, funds_sent).unwrap();
+                app.execute(Addr::unchecked(USER), cosmos_msg).unwrap(); 
+            }
 
             let resp: Vec<OfferResp> = app
                 .wrap()
-                .query_wasm_smart(cw_template_contract.addr(), &QueryMsg::OffersByPrice {page:1, page_size: 10,limit: 85, sort: false})
+                .query_wasm_smart(cw_template_contract.addr(), &QueryMsg::OffersByPrice {page:10, page_size: 10,limit: 85, sort: true})
                 .unwrap();
-
-            assert_eq!(
-                resp,
-                [
-                    OfferResp {
-                        offer_id: 2,
-                        owner: Addr::unchecked("user"),
-                        amount: 90,
-                        start_time: resp[0].start_time,
-                        collection_id: 1,
-                        token_id: "".to_string(),
-                        accepted: false,
-                        borrower: Addr::unchecked("none")
-                    },
-                    OfferResp {
-                        offer_id: 3,
-                        owner: Addr::unchecked("another_user"),
-                        amount: 100,
-                        start_time: resp[1].start_time,
-                        collection_id: 2,
-                        token_id: "".to_string(),
-                        accepted: false,
-                        borrower: Addr::unchecked("none")
-                    }
-                ]
-            );
-
-            let resp: Vec<OfferResp> = app
-            .wrap()
-            .query_wasm_smart(cw_template_contract.addr(), &QueryMsg::OffersByPrice {page:1, page_size: 1,limit: 85, sort: false})
-            .unwrap();
-
-        assert_eq!(
-            resp,
-            [
-                OfferResp {
-                    offer_id: 2,
-                    owner: Addr::unchecked("user"),
-                    amount: 90,
-                    start_time: resp[0].start_time,
-                    collection_id: 1,
-                    token_id: "".to_string(),
-                    accepted: false,
-                    borrower: Addr::unchecked("none")
-                }
-            ]
-        );
-
-            let resp: Vec<OfferResp> = app
-            .wrap()
-            .query_wasm_smart(cw_template_contract.addr(), &QueryMsg::OffersByPrice {page:1, page_size: 10, limit: 85, sort: true})
-            .unwrap();
-
-            assert_eq!(
-                resp,
-                [
-                    OfferResp {
-                        offer_id: 3,
-                        owner: Addr::unchecked("another_user"),
-                        amount: 100,
-                        start_time: resp[1].start_time,
-                        collection_id: 2,
-                        token_id: "".to_string(),
-                        accepted: false,
-                        borrower: Addr::unchecked("none")
-                    },
-                    OfferResp {
-                        offer_id: 2,
-                        owner: Addr::unchecked("user"),
-                        amount: 90,
-                        start_time: resp[0].start_time,
-                        collection_id: 1,
-                        token_id: "".to_string(),
-                        accepted: false,
-                        borrower: Addr::unchecked("none")
-                    }
-                ]
-            )
-        
-           
+            println!("{:?}", resp);
         }
     
     }

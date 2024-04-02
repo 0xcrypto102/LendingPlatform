@@ -1,8 +1,10 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
+use std::cmp::Reverse;
 use cosmwasm_std::{Binary,to_binary, Empty,  Coin, Deps, DepsMut, Env, MessageInfo, Response, StdResult, Addr, BankMsg, CosmosMsg, WasmMsg};
 use cw721::{ Cw721ExecuteMsg };
 use cw_utils::PaymentError;
+use cw_storage_plus::{ Map };
 
 use crate::error::ContractError;
 use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg, OfferResp, OfferListResp, ContractConfig, NFTCollectionResp, NFTCollectionListResp };
@@ -595,10 +597,7 @@ mod query {
             let offer = match OFFERS.may_load(deps.storage, i)? {
                 Some(offer) => {
                     if offer.amount > limit {
-                        count += 1;
-                        if count > (page - 1) * page_size && count <= page * page_size{
-                            resp_offers.push(offer);
-                        } else { continue; }
+                        resp_offers.push(offer);
                     }
                 },
                 _ => continue,
@@ -618,8 +617,12 @@ mod query {
                 a.amount.cmp(&b.amount)
             });
         }
-      
-        let result = to_binary(&resp_offers)?;
+
+        let total_pages = (resp_offers.len() + page_size as usize - 1) / page_size as usize;
+        let start_index = (page - 1) as usize * page_size as usize;
+        let end_index = std::cmp::min(start_index + page_size as usize, resp_offers.len().try_into().unwrap());
+    
+        let result = to_binary(&resp_offers[start_index..end_index])?;
         Ok(result)
     }
     

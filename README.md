@@ -81,6 +81,6 @@ And the order is shown to both lender and the borrower on their active order tab
 Now when User B wants to repay the loan, he comes to FoxyLend, selects the order and repays the 1000 sei + interest of 100 sei (assume the interest is 100 sei). So the 1100 sei goes to the escrow wallet, and the WEBUMP goes back to the borrower. And from the 1100 sei, we deduct 20% of the interest earned that is 20 sei and gives the lender 1080 sei back. 
 
 
-WORKING EXAMPLE FAILED TO REPAY 
+### WORKING EXAMPLE FAILED TO REPAY 
 
 Suppose User B lost the 1000 Sei on gambling and can’t repay back. So after the loan time ends, we send the WEBUMP from the escrow wallet to the lender. So the lender gets the WEBUMP for 1000 sei that had floor of 1200 sei. And the borrower got 1000 sei already. A good deal.

@@ -117,17 +117,17 @@ mod tests {
         use crate::msg::{ExecuteMsg, QueryMsg, OfferResp, OfferListResp, ContractConfig, NFTCollectionResp };
 
         #[test]
-    //     fn lend() {
-    //         let (mut app, cw_template_contract) = proper_instantiate();
-    //         // Set amount and collection id to make offer
-    //         let amount: u128 = 50;
+        fn lend() {
+            let (mut app, cw_template_contract) = proper_instantiate();
+            // Set amount and collection id to make offer
+            let amount: u128 = 50;
 
             let collection_id: u16 = 1;
 
             let msg = ExecuteMsg::Lend {amount: amount, collection_id: collection_id } ;
             let funds_sent = Coin::new(50u128, "SEI".to_string());
             let cosmos_msg = cw_template_contract.call(msg, funds_sent).unwrap();
-            let res = app.execute(Addr::unchecked(USER), cosmos_msg).unwrap(); 
+            app.execute(Addr::unchecked(USER), cosmos_msg).unwrap(); 
             // get the offer by offer_id
             let resp: OfferResp = app
                 .wrap()
@@ -162,7 +162,7 @@ mod tests {
             let cosmos_msg = cw_template_contract.call(msg, funds_sent).unwrap();
             app.execute(Addr::unchecked(USER), cosmos_msg).unwrap(); 
             // create offer
-            let resp: OfferResp = app
+            let _res: OfferResp = app
                 .wrap()
                 .query_wasm_smart(cw_template_contract.addr(), &QueryMsg::OfferByID {offer_id: 1})
                 .unwrap();
@@ -170,7 +170,7 @@ mod tests {
             let balance = app.wrap().query_balance("user","SEI").unwrap();
             println!("SEI Token amount before cancel offer:-> {:?}", balance);
 
-            let res = app.execute_contract(
+            app.execute_contract(
                 Addr::unchecked("user"),
                 cw_template_contract.addr().clone(),
                 &ExecuteMsg::CancelOffer { offer_id: offer_id },
@@ -281,7 +281,7 @@ mod tests {
             app.execute_contract(
                 Addr::unchecked("borrow"),
                 cw_template_contract.addr().clone(),
-                &ExecuteMsg::Borrow {offer_id: 1, token_id: token_id.clone() },
+                &ExecuteMsg::Borrow {owner: Addr::unchecked("user"),offer_id: 1, token_id: token_id.clone() },
                 &[],
             ).unwrap();
 
@@ -312,7 +312,7 @@ mod tests {
             app.execute_contract(
                 Addr::unchecked("borrow"),
                 cw_template_contract.addr().clone(),
-                &ExecuteMsg::Borrow {offer_id: 1, token_id: token_id.clone() },
+                &ExecuteMsg::Borrow {owner: Addr::unchecked("user"),offer_id: 1, token_id: token_id.clone() },
                 &[],
             ).unwrap();
 
@@ -333,8 +333,8 @@ mod tests {
                 chain_id: block.chain_id,
             });
             // repay function
-            let msg = ExecuteMsg::Repay {offer_id: 1 } ;
-            let funds_sent = Coin::new(172u128, "SEI".to_string());
+            let msg = ExecuteMsg::Repay {owner: Addr::unchecked("user"),offer_id: 1 } ;
+            let funds_sent = Coin::new(173u128, "SEI".to_string());
             let cosmos_msg = cw_template_contract.call(msg, funds_sent).unwrap();
             let res = app.execute(Addr::unchecked("borrow"), cosmos_msg).unwrap(); 
 
@@ -356,8 +356,7 @@ mod tests {
             let msg = ExecuteMsg::Lend {amount: amount, collection_id: collection_id } ;
             let funds_sent = Coin::new(200u128, "SEI".to_string());
             let cosmos_msg = cw_template_contract.call(msg, funds_sent).unwrap();
-            let res = app.execute(Addr::unchecked(USER), cosmos_msg); 
-            // println!("{:?}", res);
+            app.execute(Addr::unchecked(USER), cosmos_msg); 
         }
 
         #[test]
@@ -373,19 +372,18 @@ mod tests {
             let cosmos_msg = cw_template_contract.call(msg, funds_sent).unwrap();
             app.execute(Addr::unchecked(USER), cosmos_msg).unwrap(); 
             // create offer
-            let resp: OfferResp = app
+            let _res: OfferResp = app
                 .wrap()
                 .query_wasm_smart(cw_template_contract.addr(), &QueryMsg::OfferByID {offer_id: 1})
                 .unwrap();
 
             // cancel offer
-            let res = app.execute_contract(
+            app.execute_contract(
                 Addr::unchecked("another_user"),
                 cw_template_contract.addr().clone(),
                 &ExecuteMsg::CancelOffer { offer_id: offer_id },
                 &[]
             );
-            // println!("{:?}", res);
         }
         
         #[test]
@@ -407,32 +405,28 @@ mod tests {
             app.execute_contract(
                 Addr::unchecked("borrow"),
                 cw_template_contract.addr().clone(),
-                &ExecuteMsg::Borrow {offer_id: 1, token_id: token_id.clone() },
+                &ExecuteMsg::Borrow {owner: Addr::unchecked("user"), offer_id: 1, token_id: token_id.clone() },
                 &[],
             ).unwrap();
             // fail because this was already accepted
-            let res = app.execute_contract(
+            app.execute_contract(
                 Addr::unchecked("another_user"),
                 cw_template_contract.addr().clone(),
-                &ExecuteMsg::Borrow {offer_id: 1, token_id: token_id.clone() },
+                &ExecuteMsg::Borrow {owner: Addr::unchecked("user"),offer_id: 1, token_id: token_id.clone() },
                 &[],
             );
-
-            // println!("{:?}", res);
         }
 
         #[test]
         fn update_floor_price_fail_cause_not_admin() {
             let (mut app, cw_template_contract) = proper_instantiate();
 
-            let res = app.execute_contract(
+            app.execute_contract(
                 Addr::unchecked("user"),
                 cw_template_contract.addr().clone(),
                 &ExecuteMsg::UpdateFloorPrice {collection_id: 1, new_floor_price: 120 },
                 &[],
             );
-
-            println!("{:?}", res);
         }
         
         #[test]
@@ -440,26 +434,24 @@ mod tests {
             let (mut app, cw_template_contract) = proper_instantiate();
             let new_admin = Addr::unchecked("UpdateAdmin");
 
-            let res = app.execute_contract(
+            app.execute_contract(
                 Addr::unchecked("user"),
                 cw_template_contract.addr().clone(),
                 &ExecuteMsg::UpdateAdmin {new_admin: new_admin.clone() },
                 &[],
             );
-            // println!("{:?}", res)
         }
         
         #[test]
         fn update_interest_fail_cause_not_admin() {
             let (mut app, cw_template_contract) = proper_instantiate();
 
-            let res = app.execute_contract(
+            app.execute_contract(
                 Addr::unchecked("user"),
                 cw_template_contract.addr().clone(),
                 &ExecuteMsg::UpdateInterest {interest: 85 },
                 &[],
             );
-            // println!("{:?}", res)
         }
         
 
@@ -482,7 +474,7 @@ mod tests {
             app.execute_contract(
                 Addr::unchecked("borrow"),
                 cw_template_contract.addr().clone(),
-                &ExecuteMsg::Borrow {offer_id: 1, token_id: token_id.clone() },
+                &ExecuteMsg::Borrow {owner: Addr::unchecked("user"),offer_id: 1, token_id: token_id.clone() },
                 &[],
             ).unwrap();
 
@@ -495,7 +487,7 @@ mod tests {
                 chain_id: block.chain_id,
             });
             // repay function
-            let msg = ExecuteMsg::Repay {offer_id: 1 } ;
+            let msg = ExecuteMsg::Repay {owner: Addr::unchecked("user"),offer_id: 1 } ;
             let funds_sent = Coin::new(172u128, "SEI".to_string());
             let cosmos_msg = cw_template_contract.call(msg, funds_sent).unwrap();
             let res = app.execute(Addr::unchecked("borrow"), cosmos_msg); 
@@ -508,6 +500,7 @@ mod tests {
         use super::*;
         use crate::msg::{ExecuteMsg, QueryMsg, OfferResp, OfferListResp, ContractConfig, NFTCollectionResp };
 
+        #[test]
         fn query_by_id() {
             let (mut app, cw_template_contract) = proper_instantiate();
             // Set amount and collection id to make offer
@@ -518,7 +511,7 @@ mod tests {
             let msg = ExecuteMsg::Lend {amount: amount, collection_id: collection_id } ;
             let funds_sent = Coin::new(50u128, "SEI".to_string());
             let cosmos_msg = cw_template_contract.call(msg, funds_sent).unwrap();
-            let res = app.execute(Addr::unchecked(USER), cosmos_msg).unwrap(); 
+            app.execute(Addr::unchecked(USER), cosmos_msg).unwrap(); 
             // get the offer by offer_id
             let resp: OfferResp = app
                 .wrap()
@@ -579,12 +572,14 @@ mod tests {
             let cosmos_msg = cw_template_contract.call(msg, funds_sent).unwrap();
             app.execute(Addr::unchecked(USER), cosmos_msg).unwrap(); 
           
-            let start: u16 = 1;
-            let stop: u16 = 2;
+            let page_size: u16 = 2;
+            let page_num: u16 = 1;
             let resp: Vec<OfferResp> = app
                 .wrap()
-                .query_wasm_smart(cw_template_contract.addr(), &QueryMsg::OfferList {start: start, stop: stop})
+                .query_wasm_smart(cw_template_contract.addr(), &QueryMsg::OfferList {page_size: page_size, page_num: page_num})
                 .unwrap();
+            println!("{:?}", resp);
+
             assert_eq!(
                 resp,
                 [
@@ -640,7 +635,7 @@ mod tests {
             let msg = ExecuteMsg::Lend {amount: amount, collection_id: collection_id } ;
             let funds_sent = Coin::new(100u128, "SEI".to_string());
             let cosmos_msg = cw_template_contract.call(msg, funds_sent).unwrap();
-            app.execute(Addr::unchecked(ANOTHER_USER), cosmos_msg).unwrap(); 
+            app.execute(Addr::unchecked(USER), cosmos_msg).unwrap(); 
 
             // Set amount and collection id to make offer
             let amount: u128 = 120;
@@ -651,28 +646,22 @@ mod tests {
             let cosmos_msg = cw_template_contract.call(msg, funds_sent).unwrap();
             app.execute(Addr::unchecked(ANOTHER_USER), cosmos_msg).unwrap(); 
             
+            let page_size: u16 = 2;
+            let page_num: u16 = 1;
+
             let resp: Vec<OfferResp> = app
                 .wrap()
-                .query_wasm_smart(cw_template_contract.addr(), &QueryMsg::OffersByOwner {owner: Addr::unchecked(ANOTHER_USER)})
+                .query_wasm_smart(cw_template_contract.addr(), &QueryMsg::OffersByOwner {owner: Addr::unchecked(ANOTHER_USER), page_size: page_size, page_num: page_num})
                 .unwrap();
+
             assert_eq!(
                 resp,
                 [
                     OfferResp {
-                        offer_id: 3,
-                        owner: Addr::unchecked("another_user"),
-                        amount: 100,
-                        start_time: resp[0].start_time,
-                        collection_id: 2,
-                        token_id: "".to_string(),
-                        accepted: false,
-                        borrower: Addr::unchecked("none")
-                    },
-                    OfferResp {
                         offer_id: 4,
                         owner: Addr::unchecked("another_user"),
                         amount: 120,
-                        start_time: resp[1].start_time,
+                        start_time: resp[0].start_time,
                         collection_id: 2,
                         token_id: "".to_string(),
                         accepted: false,
@@ -725,7 +714,7 @@ mod tests {
             app.execute_contract(
                 Addr::unchecked("borrow"),
                 cw_template_contract.addr().clone(),
-                &ExecuteMsg::Borrow {offer_id: 1, token_id: token_id.clone() },
+                &ExecuteMsg::Borrow {owner: Addr::unchecked("user"),offer_id: 1, token_id: token_id.clone() },
                 &[],
             ).unwrap();
 
@@ -733,14 +722,19 @@ mod tests {
             app.execute_contract(
                 Addr::unchecked("borrow"),
                 cw_template_contract.addr().clone(),
-                &ExecuteMsg::Borrow {offer_id: 4, token_id: token_id.clone() },
+                &ExecuteMsg::Borrow {owner: Addr::unchecked("another_user"),offer_id: 4, token_id: token_id.clone() },
                 &[],
             ).unwrap();
+
+            let page_size = 4;
+            let page_num = 1;
             
             let resp: Vec<OfferResp> = app
                 .wrap()
-                .query_wasm_smart(cw_template_contract.addr(), &QueryMsg::OffersAcceptByBorrow {borrower: Addr::unchecked("borrow")})
+                .query_wasm_smart(cw_template_contract.addr(), &QueryMsg::OffersAcceptByBorrow {borrower: Addr::unchecked("borrow"),page_size: page_size, page_num: page_num})
                 .unwrap();
+
+            println!("data-> {:?}", resp);
 
             assert_eq!(
                 resp,
@@ -774,8 +768,8 @@ mod tests {
             let (mut app, cw_template_contract) = proper_instantiate();
             // Set amount and collection id to make offer
             // Simulate 1000 offers
-            for i in 0..10000 {
-                let amount: u128 = (i % 100 + 1) ; // Varying amount
+            for i in 0..1000 {
+                let amount: u128 = i % 100 + 1 ; // Varying amount
                 let collection_id: u16 = ((i % 2) + 1).try_into().unwrap();   // Varying collection_id
                 let msg = ExecuteMsg::Lend { amount, collection_id };
                 let funds_sent = Coin::new(amount, "SEI".to_string());

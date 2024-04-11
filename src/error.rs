@@ -1,6 +1,5 @@
 use cosmwasm_std::StdError;
 use thiserror::Error;
-use cw_utils::PaymentError;
 
 #[derive(Error, Debug)]
 pub enum ContractError {
@@ -12,6 +11,9 @@ pub enum ContractError {
 
     #[error("Invalid NFT Owner")]
     InvalidNftOwner,
+
+    #[error("Invalid Offer Id")]
+    InvalidOfferId,
 
     #[error("Invalid Borrower")]
     InvalidBorrow,

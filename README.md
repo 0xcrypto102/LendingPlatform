@@ -31,37 +31,37 @@ Leap Wallet
 - FoxyLend is a place where users can lend or borrow money by using theit NFT as collateral. Anyone with an NFT can borrow money by collateralising his NFT and lenders can make profit through APY by lending money. 
 
 ### LEND
-    Suppose user A has 1000 sei that he want to lend, so he goes to FoxyLend, selects a collection that he wants to lend the sei on, and creates an offer by selecting the amount he wants to lend ( the amount cannot be bigger than the floor of that collection, and lender can choose how much he wants to lend and how many NFTs he wants to lend for) . And the lend offer is created, the amount is deducted from his wallet and goes to the eacrow wallet. Then we’ll show every other lend offers on that collection too in an order (high to low). 
+Suppose user A has 1000 sei that he want to lend, so he goes to FoxyLend, selects a collection that he wants to lend the sei on, and creates an offer by selecting the amount he wants to lend ( the amount cannot be bigger than the floor of that collection, and lender can choose how much he wants to lend and how many NFTs he wants to lend for) . And the lend offer is created, the amount is deducted from his wallet and goes to the eacrow wallet. Then we’ll show every other lend offers on that collection too in an order (high to low). 
 
 ### BORROW
-    Now suppose user B has an NFT, he goes to FoxyLend and see what offers that collection has. If there’s multiple offers then he choses one and accepts that. Now the NFT he owns goes to escrow wallet, and the loan amount goes to him from the escrow wallet. 
+Now suppose user B has an NFT, he goes to FoxyLend and see what offers that collection has. If there’s multiple offers then he choses one and accepts that. Now the NFT he owns goes to escrow wallet, and the loan amount goes to him from the escrow wallet. 
 
 ### REPAY
-    When the borrower feels he now can repay the loan he goes to FoxyLend, selects the order he wants to repay. And pays the Capital+Interest (preset). Now the repay amount goes to escrow wallet and the NFT goes back to the borrower. And then we deduct the fee from the loan amount (20% of the interest earned) and return the rest to the lender. 
+When the borrower feels he now can repay the loan he goes to FoxyLend, selects the order he wants to repay. And pays the Capital+Interest (preset). Now the repay amount goes to escrow wallet and the NFT goes back to the borrower. And then we deduct the fee from the loan amount (20% of the interest earned) and return the rest to the lender. 
 
 ### FAILED TO REPAY
-    Within the selected loan timeline, if the borrower fails to repay the loan, we transfer the NFT from escrow wallet to the lender. 
+Within the selected loan timeline, if the borrower fails to repay the loan, we transfer the NFT from escrow wallet to the lender. 
 
 
 ### KEY POINTS 
 
-    • We set an APY and max time of a loan for every collection. 
-    APY will have 3 tiers. 
-    160% for Bluechip NFTs 
-    180% for medium ones 
-    200% for low cap/risky ones 
+• We set an APY and max time of a loan for every collection. 
+APY will have 3 tiers. 
+160% for Bluechip NFTs 
+180% for medium ones 
+200% for low cap/risky ones 
 
-    • Lender can only choose the amount he wants to lend per NFT. APY and MAX TIME is preset foreach collection. And while creating the offer we show an approximate interest that’ll be generated from that offer. 
+• Lender can only choose the amount he wants to lend per NFT. APY and MAX TIME is preset foreach collection. And while creating the offer we show an approximate interest that’ll be generated from that offer. 
 
-    • Borrower can only accept offers. While accepting an offer we show them the approximate interest they have to pay.
+• Borrower can only accept offers. While accepting an offer we show them the approximate interest they have to pay.
 
-    • We show all the collections with the available lend offers and live orders. And anyone can select a collection and create lend offers for them. 
+• We show all the collections with the available lend offers and live orders. And anyone can select a collection and create lend offers for them. 
 
-    • We show all the collections with the available borrow offers where anyone with an nft from any available collection can see offers and accept an offer. 
+• We show all the collections with the available borrow offers where anyone with an nft from any available collection can see offers and accept an offer. 
 
-    • We show a profile option where one can find their active lend/borrow offers and ongoing orders.
-    
-    • Interest will be calculated based on APY, Time and capital. 
+• We show a profile option where one can find their active lend/borrow offers and ongoing orders.
+
+• Interest will be calculated based on APY, Time and capital. 
     
 
 

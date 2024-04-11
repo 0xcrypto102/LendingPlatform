@@ -16,6 +16,13 @@ cargo install cargo-run-script
 
 Now, use it to create your new contract.
 Go to the folder in which you want to place it and run:
+## How to build
+
+    cargo build
+
+## How to test with logs
+
+    cargo test -- --show-output
 
 ## Summary
 

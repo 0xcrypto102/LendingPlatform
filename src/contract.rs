@@ -1,21 +1,17 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
-use std::cmp::Reverse;
-use cosmwasm_std::{Binary,to_binary, Empty,  Coin, Deps, DepsMut, Env, MessageInfo, Response, StdResult, Addr, BankMsg, CosmosMsg, WasmMsg};
-use cw721::{ Cw721ExecuteMsg };
-use cw_utils::PaymentError;
-use cw_storage_plus::{ Map };
+use cosmwasm_std::{Binary,to_binary, WasmMsg, Coin, Deps, DepsMut, Env, MessageInfo, Response, StdResult, Addr, BankMsg, CosmosMsg, StdError , Order};
 
 use crate::error::ContractError;
-use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg, OfferResp, OfferListResp, ContractConfig, NFTCollectionResp, NFTCollectionListResp };
-use crate::state::{ LEND_DENOM, OFFERS, OFFERS_OWNER, OFFERS_ACCEPT_BORROW, NFT_COLLECTIONS, LAST_OFFER_INDEX, CONFIG };
-use cw_paginate_storage::{paginate_map, paginate_map_values};   
+use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg, OfferResp, ContractConfig, NFTCollectionResp, offer_resps };
+use crate::state::{ LEND_DENOM, NFT_COLLECTIONS, LAST_OFFER_INDEX, CONFIG };
+use cw721::Cw721ExecuteMsg;
+
 /*
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:foxy-lend";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 */
-
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
     deps: DepsMut,
@@ -63,10 +59,11 @@ pub fn execute(
             env,
             offer_id
         ),
-        Borrow { offer_id, token_id} => exec::borrow (
+        Borrow { owner, offer_id, token_id} => exec::borrow (
             deps,
             env,
             info,
+            owner,
             offer_id,
             token_id
         ),
@@ -91,10 +88,11 @@ pub fn execute(
             info,
             interest
         ),
-        Repay { offer_id } => exec::repay (
+        Repay { owner,offer_id } => exec::repay (
             deps,
             info,
             env,
+            owner,
             offer_id
         )
     }
@@ -132,7 +130,7 @@ mod exec {
             borrower: Addr::unchecked("none"),
         };
 
-        let donation = match cw_utils::must_pay(&info, &denom) {
+        match cw_utils::must_pay(&info, &denom) {
             Ok(payment) => {
                 if payment.u128() != amount {
                     return Err(ContractError::NotExactAmount);
@@ -141,22 +139,11 @@ mod exec {
                     return Err(ContractError::TooMuchLendAmount)
                 }
             },
-            Err(err) => return Err(ContractError::DepositFail),
+            Err(_err) => return Err(ContractError::DepositFail),
         };
        
         // Save the offer and update the last offer index
-        OFFERS.save(deps.storage, offer.offer_id, &offer)?;
-        
-        // Load existing offers for the owner, or initialize an empty vector
-        let mut offers_owner = match OFFERS_OWNER.may_load(deps.storage, info.sender.clone())? {
-            Some(offers_owner) => offers_owner,
-            None => Vec::new(), // Initialize an empty vector if no offers exist for the owner
-        };
-        // Add the new offer ID to the vector
-        offers_owner.push(offer_index + 1);
-        // Save the updated vector of offer IDs for the owner
-        OFFERS_OWNER.save(deps.storage, info.sender.clone(), &offers_owner)?;
-
+        offer_resps().save(deps.storage,(&offer.owner, offer.offer_id), &offer)?;
         LAST_OFFER_INDEX.save(deps.storage, &(offer_index + 1))?;
         // Return the BankMsg::Send message as a response
         Ok(Response::new()
@@ -172,18 +159,16 @@ mod exec {
         // Load the denom
         let denom = LEND_DENOM.load(deps.storage)?;
         let config = CONFIG.load(deps.storage)?;
-        let contract_address = env.contract.address.clone();
-
+        let owner = info.sender;
 
         // Load the offer from storage
-        let offer = match OFFERS.may_load(deps.storage, offer_id)? {
-            Some(offer) => offer,
-            None => return Err(ContractError::OfferNotFound), // Return error if offer does not exist
+        let Some(offer) = offer_resps().may_load(deps.storage, (&owner, offer_id))? else {
+            return Err(ContractError::OfferNotFound); // Return error if offer does not exist
         };
 
         // Check if the sender is the owner of the offer
-        if offer.owner != info.sender {
-            if config.admin != info.sender {
+        if offer.owner != owner.clone() {
+            if config.admin != owner.clone() {
                 return Err(ContractError::InvalidOfferOwner);
             }
         }
@@ -202,15 +187,8 @@ mod exec {
         };
         
         // Remove the offer from storage
-        OFFERS.remove(deps.storage, offer_id);
+        offer_resps().remove(deps.storage, (&offer.owner,offer_id));
 
-        // Load existing offers for the owner, or initialize an empty vector
-        let mut offers_owner =  OFFERS_OWNER.load(deps.storage, info.sender.clone())?;
-        // Add the new offer ID to the vector
-        offers_owner.retain(|&index| index != offer_id);
-        // Save the updated vector of offer IDs for the owner
-        OFFERS_OWNER.save(deps.storage, info.sender.clone(), &offers_owner)?;
-            
         // Return a response with the repayment message
         Ok(Response::new()
             .add_message(message)
@@ -222,17 +200,18 @@ mod exec {
         deps: DepsMut,
         env: Env,
         info: MessageInfo,
+        owner: Addr,
         offer_id: u16,
         token_id: String,
     ) -> Result<Response, ContractError> {
         let denom = LEND_DENOM.load(deps.storage)?;
         // Load the offer from storage
-        let mut offer = match OFFERS.may_load(deps.storage, offer_id)? {
-            Some(offer) => offer,
-            None => return Err(ContractError::OfferNotFound), // Return error if offer does not exist
+        let Some(offer) = offer_resps().may_load(deps.storage, (&owner, offer_id))? else {
+            return Err(ContractError::OfferNotFound); // Return error if offer does not exist
         };
+
         let contract_address = env.contract.address.clone();
-        
+
         // Check if the offer is not already accepted
         if offer.accepted {
             return Err(ContractError::OfferAlreadyAccepted);
@@ -265,26 +244,20 @@ mod exec {
         };
     
         let messages: Vec<CosmosMsg> = vec![CosmosMsg::Bank(fund_msg), execute_msg];
-        // let messages: Vec<CosmosMsg> = vec![CosmosMsg::Bank(fund_msg)];
-
-        // Update the offer's token_id and accepted fields
-        offer.token_id = token_id;
-        offer.accepted = true;
-        offer.borrower = info.sender.clone();
-
+      
         // Save the updated offer back to storage
-        OFFERS.save(deps.storage, offer_id, &offer)?;
-
-        // Load existing offers for the owner, or initialize an empty vector
-        let mut offers_accept_borrow = match OFFERS_ACCEPT_BORROW.may_load(deps.storage, info.sender.clone())? {
-            Some(offers_accept_borrow) => offers_accept_borrow,
-            None => Vec::new(), // Initialize an empty vector if no offers exist for the owner
-        };
-        // Add the new offer ID to the vector
-        offers_accept_borrow.push(offer_id);
-        // Save the updated vector of offer IDs for the owner
-        OFFERS_ACCEPT_BORROW.save(deps.storage, info.sender.clone(), &offers_accept_borrow)?;
-
+        offer_resps().replace(
+            deps.storage,
+            (&offer.owner, offer.offer_id), 
+            Some(&OfferResp {
+                token_id: token_id,
+                accepted: true,
+                borrower: info.sender.clone(),
+                ..offer.clone()
+            }), 
+            Some(&offer)
+        )?;
+        
         // Return success response
         Ok(Response::new()
             .add_messages(messages)
@@ -373,17 +346,19 @@ mod exec {
         deps: DepsMut,
         info: MessageInfo,
         env: Env,
+        owner: Addr,
         offer_id: u16,
     ) -> Result<Response, ContractError>  {
         // Load the denom
         let denom = LEND_DENOM.load(deps.storage)?;
         // Load the config
         let config = CONFIG.load(deps.storage)?;
+
         // Load the offer from storage
-        let offer = match OFFERS.may_load(deps.storage, offer_id)? {
-            Some(offer) => offer,
-            None => return Err(ContractError::OfferNotFound), // Return error if offer does not exist
+        let Some(offer) = offer_resps().may_load(deps.storage, (&owner, offer_id))? else {
+            return Err(ContractError::OfferNotFound); // Return error if offer does not exist
         };
+
         // Check if the sender is the owner of the offer
         if offer.borrower != info.sender {
             return Err(ContractError::InvalidBorrow);
@@ -417,39 +392,21 @@ mod exec {
             
             let messages: Vec<CosmosMsg> = vec![execute_msg];
             // Offer remove
-            OFFERS.remove(deps.storage, offer_id);
-
-            // Load existing offers for the owner, or initialize an empty vector
-            let mut offers_owner = OFFERS_OWNER.load(deps.storage, info.sender.clone())?;
-
-            // Remove the offer index from the vector
-            offers_owner.retain(|&index| index != offer_id);
-            // Save the updated vector of offer IDs for the owner
-            OFFERS_OWNER.save(deps.storage, info.sender.clone(), &offers_owner)?;
-
-            // Load existing offers for the owner, or initialize an empty vector
-            let mut offers_accept_borrow =  OFFERS_ACCEPT_BORROW.load(deps.storage, info.sender.clone())?;
-            // Add the new offer ID to the vector
-            offers_accept_borrow.retain(|&index| index != offer_id);
-            // Save the updated vector of offer IDs for the owner
-            OFFERS_ACCEPT_BORROW.save(deps.storage, info.sender.clone(), &offers_accept_borrow)?;
+            offer_resps().remove(deps.storage, (&offer.owner, offer_id));
 
             Ok(Response::new().add_messages(messages)
                 .add_attribute("action","repay_fail"))
-                
-            // Ok(Response::new()
-            // .add_attribute("action","repay_fail"))
         } else {
             // Calculate reward
             let reward = calculate_reward(offer.start_time, collection.apy, current_time, offer.amount);
 
-            let donation = match cw_utils::must_pay(&info, &denom) {
+            match cw_utils::must_pay(&info, &denom) {
                 Ok(payment) => {
                     if payment.u128() != reward + offer.amount {
                         return Err(ContractError::NotExactAmount);
                     }
                 },
-                Err(err) => return Err(ContractError::DepositFail),
+                Err(_err) => return Err(ContractError::DepositFail),
             };
 
             // Send the NFT to the borrower
@@ -475,7 +432,7 @@ mod exec {
                 amount: payment_amount.into(),
             };
             let payment_msg = BankMsg::Send {
-                to_address: offer.owner.into(),
+                to_address: offer.owner.clone().into(),
                 amount: vec![payment_coin],
             };
 
@@ -491,23 +448,10 @@ mod exec {
                 to_address: config.admin.into(),
                 amount: vec![payment_coin],
             };
-            // Remove the offer from storage
-            OFFERS.remove(deps.storage, offer_id);
 
-            // Load existing offers for the owner, or initialize an empty vector
-            let mut offers_owner = OFFERS_OWNER.load(deps.storage, info.sender.clone())?;
-            // Remove the offer index from the vector
-            offers_owner.retain(|&index| index != offer_id);
-            // Save the updated vector of offer IDs for the owner
-            OFFERS_OWNER.save(deps.storage, info.sender.clone(), &offers_owner)?;
-
-            // Load existing offers for the owner, or initialize an empty vector
-            let mut offers_accept_borrow =  OFFERS_ACCEPT_BORROW.load(deps.storage, info.sender.clone())?;
-            // Add the new offer ID to the vector
-            offers_accept_borrow.retain(|&index| index != offer_id);
-            // Save the updated vector of offer IDs for the owner
-            OFFERS_ACCEPT_BORROW.save(deps.storage, info.sender.clone(), &offers_accept_borrow)?;
-
+            // Offer remove
+            offer_resps().remove(deps.storage, (&offer.owner.clone(), offer_id.clone()));
+    
             // Construct anxs
             Ok(Response::new()
                 .add_message(execute_msg)
@@ -534,10 +478,11 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     use QueryMsg::*;
 
     match msg {
-        OfferList {start, stop} => query::offer_list(deps,start, stop),
-        OfferByID {offer_id} => query::offer_by_id(deps, offer_id),
-        OffersByOwner {owner} => query::get_offers_by_owner(deps, owner),
-        OffersAcceptByBorrow {borrower} => query::get_offers_accept_by_borrower(deps, borrower),
+        OfferList {page_size, page_num} => query::offer_list(deps,page_size, page_num), // indexing
+        OfferByID { offer_id } => query::offer_by_id(deps, offer_id),
+        OffersByOwner {owner, page_size, page_num} => query::get_offers_by_owner(deps, owner.as_str(), page_size, page_num), 
+        OffersAcceptByBorrow {borrower, page_size, page_num} => query::get_offers_accept_by_borrower(deps, borrower, page_size, page_num), 
+
         OffersByPrice {page, page_size, limit, sort} => query::get_offers_by_price(deps,page, page_size, limit, sort),
         CollectionByID {collection_id} => query::collection_by_id(deps, collection_id),
         QueryAdmin {} => query::query_admin(deps),
@@ -547,63 +492,65 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
 mod query {
     use super::*;
 
-   // Implement the offer_list function to query all offers with pagination
-    pub fn offer_list(deps: Deps, start: u16, stop: u16) -> StdResult<Binary> {
-        // let offers = paginate_map_values(deps, &OFFERS, start_after, limit, cosmwasm_std::Order::Descending,)?;
-        // let offer_list_resp = OfferListResp { offers };
+    //  query range offers using indexing
+    pub fn offer_list(deps: Deps, page_size: u16, page_num: u16) -> StdResult<Binary> {
+        let to_skip_usize = usize::from(page_num * page_size - page_size);
+
+        let offer_data: Vec<_> = offer_resps()
+            .range(deps.storage, None, None, Order::Ascending)
+            .collect::<StdResult<Vec<_>>>()?
+            .into_iter()
+            .skip(to_skip_usize)
+            .take(page_size.into())
+            .map(|entry| entry.1)
+            .collect();
         
-        // Ok(to_binary(&offer_list_resp)?)
-        let mut offers: Vec<OfferResp> = Vec::new();
-
-        for i in start..=stop {
-            match OFFERS.load(deps.storage, i) {
-                Ok(offer) => {
-                    offers.push(offer);
-                }
-                Err(_) => {
-                    // Offer not found, continue to the next iteration
-                    continue;
-                }
-            }
-        }
-        Ok(to_binary(&offers)?)
+        Ok(to_binary(&offer_data)?)
     }
-
+    
     pub fn offer_by_id(deps: Deps, offer_id: u16) -> StdResult<Binary> {
-        let offer = OFFERS.load(deps.storage, offer_id)?;
-        let resp_binary = to_binary(&offer)?;
-        Ok(resp_binary)
+        let Some((_pk, offer)): Option<(_, OfferResp)> = offer_resps().idx.id.item(deps.storage, offer_id)? else {
+            return Err(StdError::GenericErr { msg: "Invalid offer ID".to_string() });
+        };
+
+        Ok(to_binary(&offer)?)
+    }
+    
+    pub fn get_offers_by_owner(deps: Deps, owner: &str, page_size: u16, page_num: u16) -> StdResult<Binary> {
+        let valid_owner = deps.api.addr_validate(owner)?;
+        let to_skip_usize = usize::from(page_num * page_size - page_size);
+
+        let offer_data: Vec<_> = offer_resps()
+            .prefix(&valid_owner)
+            .range(deps.storage, None, None, Order::Ascending)
+            .collect::<StdResult<Vec<_>>>()?
+            .into_iter()
+            .skip(to_skip_usize)
+            .take(page_size.into())
+            .map(|entry| entry.1)
+            .collect();
+        
+        Ok(to_binary(&offer_data)?)
     }
 
-    // Query offers by owner from OFFERS_OWNER
-    pub fn get_offers_by_owner(deps: Deps, owner: Addr) -> StdResult<Binary> {
-        let offer_ids = OFFERS_OWNER.load(deps.storage, owner.clone())?;
-        let mut offers = Vec::new();
-      
-        for offer_id in offer_ids {
-            let offer = OFFERS.load(deps.storage, offer_id)?;
-            offers.push(offer);
-        }
-      
-        let resp_offers = to_binary(&offers)?;
-        Ok(resp_offers)
-    }
-
-    pub fn get_offers_by_price(deps: Deps,page:u16, page_size: u16, limit: u128, sort: bool) -> StdResult<Binary> {
-        let total_offers = LAST_OFFER_INDEX.load(deps.storage)?; 
-        let mut resp_offers = Vec::new();
-        let mut count = 0;
-        for i in 1..=total_offers {
-            let offer = match OFFERS.may_load(deps.storage, i)? {
-                Some(offer) => {
-                    if offer.amount > limit {
-                        resp_offers.push(offer);
-                    }
-                },
-                _ => continue,
-            };
-        }
-
+    pub fn get_offers_by_price(deps: Deps,page_size:u16, page_num: u16, limit: u128, sort: bool) -> StdResult<Binary> {
+        let to_skip_usize = usize::from(page_num * page_size - page_size);
+        
+        let  mut resp_offers: Vec<_> = offer_resps()
+            .range(deps.storage, None, None, Order::Ascending)
+            .collect::<StdResult<Vec<_>>>()?
+            .into_iter()
+            .filter_map(|entry| {
+                let x = entry.1.clone();
+                if x.amount > limit
+                {
+                   Some(x)
+                } else {
+                   None
+                }
+            })
+            .collect();
+        
          // Sort offers based on price if `sort` flag is set to true
         if sort {
             resp_offers.sort_by(|a, b| {
@@ -618,26 +565,37 @@ mod query {
             });
         }
 
-        let total_pages = (resp_offers.len() + page_size as usize - 1) / page_size as usize;
-        let start_index = (page - 1) as usize * page_size as usize;
+        let _total_pages = (resp_offers.len() + page_size as usize - 1) / page_size as usize;
+        let start_index = (page_num - 1) as usize * page_size as usize;
         let end_index = std::cmp::min(start_index + page_size as usize, resp_offers.len().try_into().unwrap());
     
         let result = to_binary(&resp_offers[start_index..end_index])?;
         Ok(result)
     }
     
+    pub fn get_offers_accept_by_borrower(deps: Deps, borrower: Addr, page_size: u16, page_num: u16) -> StdResult<Binary> {
+        let valid_owner = deps.api.addr_validate(borrower.as_str())?;
+        let to_skip_usize = usize::from(page_num * page_size - page_size);
 
-    pub fn get_offers_accept_by_borrower(deps: Deps, borrower: Addr) -> StdResult<Binary> {
-        let offer_ids = OFFERS_ACCEPT_BORROW.load(deps.storage, borrower.clone())?;
-        let mut offers = Vec::new();
-      
-        for offer_id in offer_ids {
-            let offer = OFFERS.load(deps.storage, offer_id)?;
-            offers.push(offer);
-        }
-      
-        let resp_offers = to_binary(&offers)?;
-        Ok(resp_offers)
+        let offer_data: Vec<_> = offer_resps()
+            .range(deps.storage, None, None, Order::Ascending)
+            .collect::<StdResult<Vec<_>>>()?
+            .into_iter()
+            .skip(to_skip_usize)
+            .take(page_size.into())
+            .filter_map(|entry| {
+                let x = entry.1.clone();
+
+                if x.borrower == valid_owner && x.accepted
+                {
+                   Some(x)
+                } else {
+                   None
+                }
+            })
+            .collect();
+        
+        Ok(to_binary(&offer_data)?)
     }
 
     pub fn collection_by_id(deps: Deps, collection_id: u16) -> StdResult<Binary> {
